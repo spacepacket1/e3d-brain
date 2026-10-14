@@ -145,7 +145,7 @@ function renderConversation(c: Conversation, opts: ArchiveOptions, counts: Map<D
 }
 
 /** Existing archive files for a source, by id (a conversation keeps its file if its start year changes). */
-function existingFiles(vaultPath: string, source: ConversationSource): Map<string, string> {
+export function existingFiles(vaultPath: string, source: ConversationSource): Map<string, string> {
   const out = new Map<string, string>();
   const rel = `${RAW_CONVERSATIONS_DIR}/${source}`;
   const dir = realVaultDir(vaultPath, rel, false);

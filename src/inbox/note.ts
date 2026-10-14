@@ -83,6 +83,8 @@ export interface ProposalFields {
   sources: readonly string[];
   scrubVersion: number;
   untrustedOrigin?: boolean;
+  /** Further frontmatter keys appended after the standard ones (never replacing them). */
+  extra?: Readonly<Record<string, unknown>>;
 }
 
 /** The note text of a new proposal: frontmatter (`schema: 1`, `status: proposed`, provenance), a heading, the body. */
@@ -100,6 +102,7 @@ export function renderProposal(f: ProposalFields, body: string): string {
     scrubVersion: f.scrubVersion,
   };
   if (f.untrustedOrigin === true) fm['untrusted_origin'] = true;
+  for (const [k, v] of Object.entries(f.extra ?? {})) if (!Object.hasOwn(fm, k)) fm[k] = v;
   const yaml = stringify(fm, { lineWidth: 0 });
   const text = body.replace(/\r\n?/g, '\n').replace(/^\n+/, '').replace(/\s+$/, '');
   return `---\n${yaml}---\n# ${f.title}\n${text === '' ? '' : `\n${text}\n`}`;

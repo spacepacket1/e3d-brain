@@ -9,6 +9,7 @@ import { runInit, terminalPrompt } from './init.js';
 import { isConversationImportSource, runConversationImport } from './import-commands.js';
 import { runHook } from './hook-commands.js';
 import { runImport, runJournal } from './journal-commands.js';
+import { runPropose } from './propose-command.js';
 import { runRefs } from './refs-commands.js';
 import { runScrub } from './scrub-command.js';
 import { ConfigError, loadConfig } from '../config.js';
@@ -60,6 +61,9 @@ commands:
   hook pre-compact  write one checkpoint proposal to _inbox/ (needs mode inbox and hooks.captureCheckpoints: true)
   hook install      add ebrain's SessionStart and PreCompact hooks to ~/.claude/settings.json
   hook remove       remove only the hooks ebrain added
+  propose [--since <date>] [--source <source|archive-id>] [--i-understand-data-leaves-machine]
+                    extract candidate notes (decisions, preferences, lessons, ideas) from the raw archive
+                    into _inbox/ with turn citations (needs llm.provider, mode inbox, human principal)
   scrub <file|-> [--strict] [--entropy-threshold <bits>]
                     print the text with secrets redacted; finding counts go to stderr
                     (--strict: agent rules, reject on any credential and exit 3)
@@ -140,6 +144,8 @@ export function main(argv: readonly string[]): number | Promise<number> {
       return runRefs(rest).then(emit);
     case 'hook':
       return emit(runHook(rest));
+    case 'propose':
+      return runPropose(rest).then(emit);
     case 'init':
       return runInitCommand(rest);
     case 'mcp':

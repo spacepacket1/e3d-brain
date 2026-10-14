@@ -265,6 +265,22 @@ keys and invalid values are errors (I10).
   fail open (exit 0). `install`/`remove` edit only entries ending in
   `hook <event> --ebrain-managed` and refuse a settings file that is not a
   JSON object.
+- Candidate proposals (Phase 14, I2, I3, I5): `ebrain propose` is owner CLI
+  only (no MCP tool), refuses unless `mode` is `inbox` and the principal is
+  `human`, and writes only through the inbox writer to `_inbox/` plus an
+  ids-only ledger in the state dir. Providers live in the shared `src/llm/`
+  layer and reach the network only through `src/net/http.ts` (host policy
+  re-checked per call, redirects refused, timeout, 16 MiB response cap).
+  `none` is the default and runs no network code. `anthropic` additionally
+  requires `api.anthropic.com` in `network.allowedHosts` and the
+  `--i-understand-data-leaves-machine` flag on each run; its key is read from
+  an environment variable named in config and never stored there. Archive
+  turns are re-scrubbed before every request; model output is validated
+  against a strict schema (quotes must appear in the cited turns) and scrubbed
+  before writing. Error messages never include request or response bodies.
+  Residual: the provider sees scrubbed conversation text (heuristic scrubber
+  misses included), and the transcript is untrusted model input that may try
+  to steer extraction; every result is an unrated proposal awaiting review.
 - Embeddings (Phase 12, I3, I5): off by default (`provider: none` runs no
   `src/net/` code, asserted by a spy test). The Ollama client lives in
   `src/net/`; the base URL must be loopback or in `network.allowedHosts`, which

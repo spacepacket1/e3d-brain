@@ -196,12 +196,20 @@ Optional keys may be omitted to take their defaults.
 | `hooks.focus` | no | `""` | up to 2000 characters of your own text placed in the session brief |
 | `hooks.captureCheckpoints` | no | `false` | must be exactly `true` for `hook pre-compact` to write a checkpoint |
 | `hooks.claudeProjectsDir` | no | `~/.claude/projects` | `pre-compact` reads a transcript only from a file under this directory |
+| `llm.provider` | no | `none` | `none` (`ebrain propose` refuses; no network code runs), `openai-compatible` (a local model), or `anthropic` (see Candidate notes) |
+| `llm.model` | for a provider | `""` | at most 200 characters; required unless the provider is `none` |
+| `llm.baseUrl` | no | `http://127.0.0.1:11434/v1` (`anthropic`: `https://api.anthropic.com`) | same rules as `embeddings.baseUrl`: loopback, or a host in `network.allowedHosts` |
+| `llm.apiKeyEnv` | no | `""` (`anthropic`: `ANTHROPIC_API_KEY`) | the **name** of an environment variable holding the API key (`[A-Z_][A-Z0-9_]*`); keys are never stored in the config, and an `apiKey` key is rejected as unknown |
+| `llm.maxCallsPerRun` | no | `20` | integer 1-10000; a run stops cleanly when the next call would exceed it |
+| `llm.maxInputCharsPerRun` | no | `200000` | integer 1000-100000000; characters sent per run (prompt plus archive text) |
+| `llm.maxOutputTokens` | no | `2048` | integer 64-64000; completion size requested per call |
+| `llm.timeoutMs` | no | `120000` | integer 1000-600000; per-call timeout |
 
 Later phases add keys here in the same change that adds them to the schema.
 
 ## State directory
 
-`stateDir` holds derived and private data (index, audit log, the reference
+`stateDir` holds derived and private data (index, audit log, the `propose` candidate-id ledger, the reference
 library `refs.db`). It is created
 with mode `0700`; files the tool creates are `0600`. It is never synced
 between machines and never placed inside the vault.
@@ -471,6 +479,67 @@ ebrain hook remove      # remove only the entries ebrain added
   hook <event> --ebrain-managed`; the trailing flag marks entries ebrain owns.
   Nothing depends on `PATH`. Re-run `install` after moving the checkout or
   upgrading node. Your own hooks and every other setting are left as they are.
+
+## Candidate notes (propose)
+
+`ebrain propose [--since <date>] [--source <source|archive-id>]` reads the raw
+archive (`_raw/conversations/`, see Importing conversations) and writes
+**candidate notes to `_inbox/` only**: decisions, preferences, lessons, and
+ideas a model found stated in a conversation. Nothing else in the vault
+changes. Review them like any proposal (`ebrain inbox list|show|accept|reject`).
+
+Off by default. With `llm.provider: "none"` the command exits with a message
+and touches no network code. It also refuses unless `mode` is `inbox` and the
+principal is `human`. For a local model (Ollama shown; llama.cpp's server
+works the same way):
+
+```json
+"llm": { "provider": "openai-compatible", "model": "llama3.1", "baseUrl": "http://127.0.0.1:11434/v1" }
+```
+
+- `--since <date>` keeps conversations that ended on or after the ISO date;
+  `--source` takes `claude-code`, `claude-export`, `chatgpt-export`, or one
+  archive note id (`raw_...`).
+- Each candidate has `status: proposed`, `confidence: unrated` (the model
+  assigns no scores), `origin: cli`, `author: ebrain-propose`,
+  `candidate_id`, `extraction_prompt` (for example `propose.v1`),
+  `extraction_model`, and in `sources` one citation to the archive turns it
+  came from: `note:<archive-id>@<rev>#turns-<a>-<b>`. The body holds the
+  statement and the supporting quote. Check the cited turns before accepting.
+- The prompt tells the model to extract only explicitly stated claims, quote
+  the supporting text, and never invent. Replies are validated against a
+  strict schema; invalid items, and items whose quote is not found verbatim in
+  the cited turns, are dropped and counted in the summary (`dropped: ...`).
+  Unparseable replies are counted as malformed responses, never fatal.
+- Idempotent: the candidate id is a hash of archive id, turn range, and the
+  normalized statement. Ids already in `_inbox/` (including `_rejected/` and
+  `_applied/`) or in `<stateDir>/propose-candidates.jsonl` (ids and paths
+  only) are skipped, so re-running, accepting, rejecting, or deleting a
+  candidate never brings it back. A different model or prompt may phrase a
+  statement differently and so produce a new candidate.
+- Budgets: `llm.maxCallsPerRun` and `llm.maxInputCharsPerRun` stop a run
+  cleanly (`stopped: budget ...`). A provider error stops further calls, keeps
+  the candidates already gathered, and exits 1.
+- Only scrubbed text is sent: archive turns are scrubbed again (non-strict)
+  before each request, so a secret pasted into an archive file by hand is
+  still redacted. Model output is scrubbed before it is written.
+
+**Cloud provider (`anthropic`).** Allowed only when `network.allowedHosts`
+includes `api.anthropic.com` **and** you pass
+`--i-understand-data-leaves-machine` on every run; without the flag the
+command refuses before any request. The key is read from the environment
+variable named by `llm.apiKeyEnv` (default `ANTHROPIC_API_KEY`):
+
+```json
+"network": { "allowedHosts": ["api.anthropic.com"] },
+"llm": { "provider": "anthropic", "model": "claude-sonnet-5-5" }
+```
+
+```sh
+ANTHROPIC_API_KEY=... ebrain propose --since 2026-10-01 --i-understand-data-leaves-machine
+```
+
+The scrubbed text of the selected conversations leaves your machine.
 
 ## Optional embeddings (hybrid search)
 

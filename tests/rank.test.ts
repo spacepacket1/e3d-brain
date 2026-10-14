@@ -204,6 +204,7 @@ const ORDER_ALLOWED: Record<string, string> = {
   'src/index/vectors.ts': 'embedding sync visits missing chunks in listing order (selection and fusion live in rank.ts)',
   'src/refs/db.ts': 'refs list in title order; chunk navigation in (chapter, ordinal) reading order',
   'src/refs/library.ts': 'refs reindex candidates in ref id order',
+  'src/propose/archive-reader.ts': 'archive notes in path order (deterministic provider request order)',
 };
 const ORDER_PATTERNS = [/\.sort\s*\(/, /\.toSorted\s*\(/, /\.reverse\s*\(/, /\.toReversed\s*\(/, /\bORDER\s+BY\b/i];
 const RELEVANCE_ORDER = /\bORDER\s+BY\b[^;`'"]*\b(?:bm25|rank|score|relevance)\b/i;

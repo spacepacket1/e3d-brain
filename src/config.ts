@@ -15,6 +15,7 @@ import { checkExtraPatterns } from './scrub/scrub.js';
 export type PrincipalType = 'human' | 'agent';
 export type Mode = 'inbox' | 'journal' | 'read-only';
 export type EmbeddingsProvider = 'none' | 'ollama';
+export type LlmProvider = 'none' | 'openai-compatible' | 'anthropic';
 /** Where vectors live. `blob`: plain SQLite BLOBs with brute-force cosine (sqlite-vec is not a dependency). */
 export type EmbeddingsStore = 'blob';
 
@@ -31,6 +32,30 @@ export interface Config {
   journal: JournalConfig;
   refs: RefsConfig;
   hooks: HooksConfig;
+  llm: LlmConfig;
+}
+
+/**
+ * The shared extraction provider (Phase 14, `src/llm/`). Provider `none` (the
+ * default) means `ebrain propose` refuses to run and no network code is
+ * touched. API keys are never in this file: `apiKeyEnv` names an environment
+ * variable.
+ */
+export interface LlmConfig {
+  provider: LlmProvider;
+  /** Required unless the provider is `none`. */
+  model: string;
+  /** Loopback, or a host listed in `network.allowedHosts`. Default depends on the provider. */
+  baseUrl: string;
+  /** Name of the environment variable holding the API key ('' = send none; `anthropic` defaults to ANTHROPIC_API_KEY). */
+  apiKeyEnv: string;
+  /** Per-run budget: most provider calls. */
+  maxCallsPerRun: number;
+  /** Per-run budget: most characters sent (prompt plus archive text). */
+  maxInputCharsPerRun: number;
+  /** Largest completion requested per call, in tokens. */
+  maxOutputTokens: number;
+  timeoutMs: number;
 }
 
 /** Optional local embeddings (Phase 12). Provider `none` (the default) means BM25 only and no network code runs. */
@@ -105,11 +130,22 @@ export const MAX_HOOK_FOCUS_CHARS = 2000;
 export const MAX_BRIEF_FOLDERS = 32;
 export const DEFAULT_EMBEDDINGS_MODEL = 'nomic-embed-text';
 export const DEFAULT_EMBEDDINGS_URL = 'http://127.0.0.1:11434';
+export const DEFAULT_LLM_URLS: Readonly<Record<LlmProvider, string>> = {
+  none: 'http://127.0.0.1:11434/v1',
+  'openai-compatible': 'http://127.0.0.1:11434/v1',
+  anthropic: 'https://api.anthropic.com',
+};
+/** `anthropic` runs only when this host is allowlisted (and the CLI flag is given). */
+export const ANTHROPIC_HOST = 'api.anthropic.com';
+export const DEFAULT_ANTHROPIC_KEY_ENV = 'ANTHROPIC_API_KEY';
+export const DEFAULT_LLM_BUDGET = { maxCallsPerRun: 20, maxInputCharsPerRun: 200_000, maxOutputTokens: 2048, timeoutMs: 120_000 } as const;
+const ENV_NAME_RE = /^[A-Z_][A-Z0-9_]{0,127}$/;
 export const PRINCIPAL_ID_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 
 const MODES: readonly Mode[] = ['inbox', 'journal', 'read-only'];
 const PRINCIPAL_TYPES: readonly PrincipalType[] = ['human', 'agent'];
 const EMBEDDINGS_PROVIDERS: readonly EmbeddingsProvider[] = ['none', 'ollama'];
+const LLM_PROVIDERS: readonly LlmProvider[] = ['none', 'openai-compatible', 'anthropic'];
 const EMBEDDINGS_STORES: readonly EmbeddingsStore[] = ['blob'];
 const HOSTNAME_RE = /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/;
 
@@ -201,7 +237,7 @@ function isInsideLexical(parent: string, child: string): boolean {
 export function parseConfig(raw: unknown, opts: { homeDir?: string } = {}): Config {
   const home = opts.homeDir ?? os.homedir();
   if (!isObject(raw)) throw new ConfigError('config must be a JSON object');
-  checkKeys(raw, ['vaultPath', 'stateDir', 'principal', 'mode', 'limits', 'network', 'scrub', 'embeddings', 'audit', 'journal', 'refs', 'hooks'], '');
+  checkKeys(raw, ['vaultPath', 'stateDir', 'principal', 'mode', 'limits', 'network', 'scrub', 'embeddings', 'audit', 'journal', 'refs', 'hooks', 'llm'], '');
 
   const vaultPath = expandHome(requiredStr(raw, 'vaultPath', 'vaultPath'), 'vaultPath', home);
   const stateDir = expandHome(str(raw, 'stateDir', 'stateDir') ?? DEFAULT_STATE_DIR, 'stateDir', home);
@@ -307,6 +343,8 @@ export function parseConfig(raw: unknown, opts: { homeDir?: string } = {}): Conf
   const claudeProjectsDir = expandHome(str(hooksRaw, 'claudeProjectsDir', 'hooks.claudeProjectsDir') ?? DEFAULT_CLAUDE_PROJECTS_DIR, 'hooks.claudeProjectsDir', home);
   const hooks: HooksConfig = { briefFolders, focus, captureCheckpoints: capture === true, claudeProjectsDir };
 
+  const llm = parseLlm(section(raw, 'llm', ['provider', 'model', 'baseUrl', 'apiKeyEnv', 'maxCallsPerRun', 'maxInputCharsPerRun', 'maxOutputTokens', 'timeoutMs'], false), allowedHosts);
+
   return {
     vaultPath,
     stateDir,
@@ -320,6 +358,46 @@ export function parseConfig(raw: unknown, opts: { homeDir?: string } = {}): Conf
     journal,
     refs,
     hooks,
+    llm,
+  };
+}
+
+function parseLlm(llmRaw: Json, allowedHosts: readonly string[]): LlmConfig {
+  const provider = oneOf(str(llmRaw, 'provider', 'llm.provider') ?? 'none', LLM_PROVIDERS, 'llm.provider');
+  const model = str(llmRaw, 'model', 'llm.model') ?? '';
+  if (model.length > 200 || /[\u0000-\u001f\u007f]/.test(model)) {
+    throw new ConfigError('config key "llm.model" must be at most 200 characters without control characters');
+  }
+  if (provider !== 'none' && model === '') throw new ConfigError(`config key "llm.model" is required for provider ${provider}`);
+  if (provider === 'anthropic' && !allowedHosts.includes(ANTHROPIC_HOST)) {
+    throw new ConfigError(`config key "llm.provider": "anthropic" requires "network.allowedHosts" to include ${ANTHROPIC_HOST}`);
+  }
+  let baseUrl = str(llmRaw, 'baseUrl', 'llm.baseUrl') ?? DEFAULT_LLM_URLS[provider];
+  try {
+    baseUrl = checkBaseUrl(baseUrl, allowedHosts);
+  } catch (err) {
+    if (!(err instanceof HostPolicyError)) throw err;
+    throw new ConfigError(`config key "llm.baseUrl" ${err.message}`);
+  }
+  const apiKeyEnv = str(llmRaw, 'apiKeyEnv', 'llm.apiKeyEnv') ?? (provider === 'anthropic' ? DEFAULT_ANTHROPIC_KEY_ENV : '');
+  if (apiKeyEnv !== '' && !ENV_NAME_RE.test(apiKeyEnv)) {
+    throw new ConfigError('config key "llm.apiKeyEnv" must be an environment variable name (A-Z, 0-9, _), not a key');
+  }
+  if (provider === 'anthropic' && apiKeyEnv === '') throw new ConfigError('config key "llm.apiKeyEnv" is required for provider anthropic');
+  const intKey = (key: keyof typeof DEFAULT_LLM_BUDGET, min: number, max: number): number => {
+    const v = llmRaw[key] === undefined ? DEFAULT_LLM_BUDGET[key] : llmRaw[key];
+    if (typeof v !== 'number' || !Number.isInteger(v) || v < min || v > max) throw new ConfigError(`config key "llm.${key}" must be an integer from ${min} to ${max}`);
+    return v;
+  };
+  return {
+    provider,
+    model,
+    baseUrl,
+    apiKeyEnv,
+    maxCallsPerRun: intKey('maxCallsPerRun', 1, 10_000),
+    maxInputCharsPerRun: intKey('maxInputCharsPerRun', 1000, 100_000_000),
+    maxOutputTokens: intKey('maxOutputTokens', 64, 64_000),
+    timeoutMs: intKey('timeoutMs', 1000, 600_000),
   };
 }
 
