@@ -186,6 +186,21 @@ keys and invalid values are errors (I10).
   `advanced: true` passes FTS5 syntax through. Residual: a `tools/call`
   whose envelope the SDK itself rejects (for example `arguments` that is not
   an object) fails at the protocol layer before dispatch and is not audited.
+- Scrubber (Phase 7, I5): `src/scrub/` is a pure library; writers call
+  `scrubForWrite` (or `scrubToolInput` from MCP tools) before persisting and
+  abort on any throw, so unscrubbed text is never written. Findings are
+  `{type, count}`; no finding, error, rejection, CLI output, or audit line
+  contains matched text. Agent principals are strict: a credential-class
+  detection rejects the write (`ToolRejection` `strict-scrub`, audited by
+  detector type). Every detector regex is bounded or literal-anchored, so
+  scanning is linear (1 MB inputs scrub in well under a second); user
+  `extraPatterns` are literal strings only. Scrubbing repeats until a pass
+  finds nothing, so it is idempotent. Residuals: detection is heuristic, so
+  an unusual secret format can pass (passwords in prose need a digit, symbol,
+  or quotes; letters-only values are caught only on `key=value` config
+  lines); base58 keys without a checksum (for example Solana) are caught only
+  by the entropy heuristic; base64 of ordinary text may be redacted as
+  `high-entropy`.
 - `ebrain doctor --strict` fails on non-loopback `allowedHosts`, any
   group/world-accessible entry under the state dir, and vault symlinks that
   escape the root.

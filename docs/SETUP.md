@@ -168,7 +168,7 @@ Optional keys may be omitted to take their defaults.
 | `mode` | yes | | `inbox`, `journal`, or `read-only`; `journal` requires `principal.type: agent` |
 | `limits.maxCharsPerCall` | no | `10000` | integer 1-10000; can only lower the built-in ceiling |
 | `network.allowedHosts` | no | `[]` | lowercase hostnames (no scheme, port, or wildcard); empty means no network |
-| `scrub.extraPatterns` | no | `[]` | non-empty strings (regular expressions, used by the scrubber in Phase 7) |
+| `scrub.extraPatterns` | no | `[]` | literal strings (not regexes), case-sensitive, 4-256 characters each, at most 64, no line breaks; redacted as `extra-pattern` (see Scrubbing) |
 | `embeddings.provider` | no | `none` | `none` (other providers are added in Phase 12) |
 | `audit.maxSegmentMB` | no | `50` | number above 0, at most 4096; audit segment size before a new segment starts |
 
@@ -223,6 +223,49 @@ notes.
 another network filesystem: several processes (the CLI and any number of MCP
 servers) share `index.db` through SQLite WAL mode, which needs working shared
 memory and POSIX locks.
+
+## Scrubbing
+
+Text that enters the vault through this tool (captures, journal entries,
+imports) passes through the scrubber (`src/scrub/`) before it is written
+(I5). Each detected secret is replaced by `[REDACTED:<type>]`; the writer
+stamps `scrubVersion` into the note's frontmatter. If scrubbing fails, the
+write is aborted. Notes you type into the vault yourself are not scrubbed.
+
+Detectors (the `<type>` names are what findings and the audit log report):
+
+| Class | Types |
+|---|---|
+| Credentials | `private-key` (PEM/OpenSSH blocks, whole block), `openai-key`, `anthropic-key`, `aws-access-key`, `aws-secret-key` (next to AWS context), `github-token`, `slack-token`, `stripe-key`, `google-api-key`, `jwt`, `bearer-token`, `password-assignment` (`password`/`passwd`/`pwd`/`secret`/`token`/`api_key` followed by `=`, `:`, or "is" and a value), `url-credentials` (`user:pass@`), `hex-private-key` (64 hex within a short window of `private`, `secret`, `priv`, `seed`, `mnemonic`, or `key=` on the same line), `wif-key` (base58check-validated), `bip39-mnemonic` (12+ consecutive words from the bundled BIP39 English list) |
+| PII | `credit-card` (Luhn and card-brand checked), `us-ssn`, `iban` (mod-97 checked), `bank-routing` / `bank-account` (only after "routing", "ABA", "account number", "acct #") |
+| Heuristic | `high-entropy`: base64-like strings of length >= 32 with Shannon entropy >= 4.3 bits/char, or pure hex >= 32 chars at >= 3.3 bits/char |
+| Yours | `extra-pattern`: the literals in `scrub.extraPatterns` |
+
+Never flagged by the hex and entropy detectors: `0x` hex (transaction
+hashes, addresses), 40-hex git SHAs, bare 64-hex hashes, ULIDs, UUIDs,
+well-formed citations (`note:`, `thesis:`, `outcome:`, `commit:`, `ref:`,
+`url:`), and checksummed Bitcoin addresses. A 64-hex string in key context is
+a key even with an `0x` prefix.
+
+**Agent principals (strict mode).** When `principal.type` is `agent`, a
+credential-class detection rejects the whole write: nothing is stored, the
+tool returns a `strict-scrub` error naming the detector types, and the audit
+line records the first detector type as its `code`. PII, the entropy
+heuristic, and `extra-pattern` still redact and continue.
+
+**Tuning.** The entropy thresholds are `DEFAULT_ENTROPY_THRESHOLD` and
+`DEFAULT_HEX_ENTROPY_THRESHOLD` in `src/scrub/detectors.ts` (library option
+`entropyThreshold` / `hexEntropyThreshold`). Lower values catch more and flag
+more identifiers; random 32+ character keys score about 4.5-5.0 and
+slugs/paths about 3.5-4.1. Arbitrary user regexes are not supported:
+JavaScript regexes cannot be interrupted, so a runaway pattern could hang the
+server.
+
+**Manual use.** `ebrain scrub <file|->` prints the scrubbed text on stdout and
+finding counts (`type: count`, never the matched text) on stderr. `--strict`
+applies the agent rules (rejection exits 3 and prints no text);
+`--entropy-threshold <bits>` overrides the threshold. `scrub.extraPatterns`
+from your config applies when a config file exists.
 
 ## Auditing
 

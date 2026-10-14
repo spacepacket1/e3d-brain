@@ -486,6 +486,31 @@ export function writeAtomic(p: SafePath, data: string | Uint8Array, opts: WriteO
 }
 
 /**
+ * Read standard input to EOF (for `ebrain scrub -`). Throws
+ * SafePathError('too-large') once more than `maxBytes` arrive.
+ */
+export function readStdinSafe(maxBytes: number): Buffer {
+  const chunks: Buffer[] = [];
+  let total = 0;
+  const chunk = Buffer.alloc(64 * 1024);
+  for (;;) {
+    let n: number;
+    try {
+      n = fs.readSync(0, chunk, 0, chunk.length, null);
+    } catch (err) {
+      if (errCode(err) === 'EAGAIN') continue;
+      if (errCode(err) === 'EOF') break;
+      throw err;
+    }
+    if (n === 0) break;
+    total += n;
+    if (total > maxBytes) fail('too-large', `input exceeds ${maxBytes} bytes`);
+    chunks.push(Buffer.from(chunk.subarray(0, n)));
+  }
+  return Buffer.concat(chunks);
+}
+
+/**
  * Append `data` to a regular file with one write(2) on an O_APPEND descriptor
  * (created with an explicit mode if missing; never truncated, never
  * followed through a symlink). Concurrent appenders each land whole records

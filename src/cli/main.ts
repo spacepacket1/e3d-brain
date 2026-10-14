@@ -5,6 +5,7 @@ import { runAudit } from './audit-commands.js';
 import { runDoctor } from './doctor.js';
 import { runIndexCommand, runReindex, type CommandResult } from './index-commands.js';
 import { runInit, terminalPrompt } from './init.js';
+import { runScrub } from './scrub-command.js';
 import { ConfigError, loadConfig } from '../config.js';
 import { runMcpServer } from '../mcp/server.js';
 import { VERSION } from '../version.js';
@@ -23,6 +24,9 @@ commands:
   audit stats       summarize the audit log (segments, outcomes, tools)
   audit prune --older-than <days>
                     delete whole audit segments older than <days> (never the current one)
+  scrub <file|-> [--strict] [--entropy-threshold <bits>]
+                    print the text with secrets redacted; finding counts go to stderr
+                    (--strict: agent rules, reject on any credential and exit 3)
   --version         print the version
   --help            show this help
 
@@ -88,6 +92,8 @@ export function main(argv: readonly string[]): number | Promise<number> {
       return emit(runIndexCommand(rest));
     case 'audit':
       return emit(runAudit(rest));
+    case 'scrub':
+      return emit(runScrub(rest));
     case 'init':
       return runInitCommand(rest);
     case 'mcp':

@@ -9,6 +9,7 @@
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { ensurePrivateDir, readExternalFile, SafePathError, type SafePath } from './safe-path.js';
+import { checkExtraPatterns } from './scrub/scrub.js';
 
 export type PrincipalType = 'human' | 'agent';
 export type Mode = 'inbox' | 'journal' | 'read-only';
@@ -177,6 +178,9 @@ export function parseConfig(raw: unknown, opts: { homeDir?: string } = {}): Conf
 
   const scrubRaw = section(raw, 'scrub', ['extraPatterns'], false);
   const extraPatterns = stringArray(scrubRaw, 'extraPatterns', 'scrub.extraPatterns');
+  // Literal strings only (no regexes), length- and count-limited (Phase 7).
+  const badPatterns = checkExtraPatterns(extraPatterns);
+  if (badPatterns !== undefined) throw new ConfigError(`config key "scrub.extraPatterns" ${badPatterns}`);
 
   const embeddingsRaw = section(raw, 'embeddings', ['provider'], false);
   const provider = oneOf(str(embeddingsRaw, 'provider', 'embeddings.provider') ?? 'none', EMBEDDINGS_PROVIDERS, 'embeddings.provider');
