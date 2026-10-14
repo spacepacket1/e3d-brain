@@ -74,6 +74,11 @@ Results are compared by, in order:
    raw name (the listing order of Phase 2, `comparePaths`).
 5. **Ordinal:** the chunk ordinal within the note.
 
+Reference books (Phase 11) are not vault notes and carry no status: every
+book passage ranks as tier T1 `reference` among books (`tierOf` with source
+`ref`), ordered by relevance and then by `<ref_id>/<chapter>` and the chunk
+ordinal. `search` returns at most `refs.maxHits` of them, after the notes.
+
 `journal_list` (Phase 9) passes `newestFirst`: after rule 3, entries with a
 later `created` come first (absent or unparseable `created` last), then rules
 4 and 5. Every other tool uses the rules above unchanged.

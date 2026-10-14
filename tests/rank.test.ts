@@ -201,6 +201,8 @@ const ORDER_ALLOWED: Record<string, string> = {
   'src/import/sources.ts': 'ChatGPT thread walked leaf-to-root, then reversed to conversation order',
   'src/import/load.ts': 'source files in name order (deterministic turn order)',
   'src/import/archive.ts': 'conversations by id and archive year dirs in name order; turn times for start/end',
+  'src/refs/db.ts': 'refs list in title order; chunk navigation in (chapter, ordinal) reading order',
+  'src/refs/library.ts': 'refs reindex candidates in ref id order',
 };
 const ORDER_PATTERNS = [/\.sort\s*\(/, /\.toSorted\s*\(/, /\.reverse\s*\(/, /\.toReversed\s*\(/, /\bORDER\s+BY\b/i];
 const RELEVANCE_ORDER = /\bORDER\s+BY\b[^;`'"]*\b(?:bm25|rank|score|relevance)\b/i;

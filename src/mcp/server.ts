@@ -15,7 +15,8 @@ import { VERSION } from '../version.js';
 import { attachToServer, listTools, ToolRegistry, type DispatchContext } from './dispatch.js';
 import { registerInboxTools } from './inbox-tools.js';
 import { registerJournalTools } from './journal-tools.js';
-import { registerReadTools } from './tools.js';
+import { registerRefTools } from './ref-tools.js';
+import { registerReadTools, type RefsEnv } from './tools.js';
 
 export const SERVER_NAME = 'e3d-brain';
 
@@ -46,7 +47,10 @@ export async function runMcpServer(opts: McpServerOptions): Promise<void> {
   const index = openIndex({ vaultPath: config.vaultPath, stateDir });
 
   const registry = new ToolRegistry();
-  registerReadTools({ vaultPath: config.vaultPath, index, mode: config.mode }, registry);
+  // The reference library (Phase 11): refs.db is opened read-only per call, so books added later are found.
+  const refs: RefsEnv = { stateDir, excerptChars: config.refs.excerptChars, maxHits: config.refs.maxHits };
+  registerReadTools({ vaultPath: config.vaultPath, index, mode: config.mode, refs }, registry);
+  registerRefTools(refs, registry);
   // capture and list_inbox exist in inbox mode only (Phase 8, I2).
   if (config.mode === 'inbox') registerInboxTools({ vaultPath: config.vaultPath, index, extraPatterns: config.scrub.extraPatterns }, registry);
   // journal_append and journal_list exist in journal mode only (Phase 9, I2; journal mode requires an agent principal).

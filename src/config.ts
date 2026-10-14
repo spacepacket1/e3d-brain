@@ -26,6 +26,15 @@ export interface Config {
   embeddings: { provider: EmbeddingsProvider };
   audit: { maxSegmentMB: number };
   journal: JournalConfig;
+  refs: RefsConfig;
+}
+
+/** Reference-library output limits for `search` (Phase 11). */
+export interface RefsConfig {
+  /** Longest excerpt per reference hit, in characters. */
+  excerptChars: number;
+  /** Most reference hits per `search` call. */
+  maxHits: number;
 }
 
 /** Journal-mode limits (Phase 9). Enforced server-side by rejecting, never truncating. */
@@ -61,6 +70,10 @@ export const MAX_CHARS_CEILING = 10000;
 export const DEFAULT_AUDIT_SEGMENT_MB = 50;
 const MAX_AUDIT_SEGMENT_MB = 4096;
 export const DEFAULT_JOURNAL: Readonly<JournalConfig> = { ttlDays: 90, maxEntryChars: 4000, maxEntriesPerHour: 60, maxTotalMB: 100 };
+export const DEFAULT_REFS: Readonly<RefsConfig> = { excerptChars: 400, maxHits: 5 };
+/** Upper bounds for `refs.*`: excerpts and hits stay short so a book cannot be dumped through `search`. */
+export const MAX_REF_EXCERPT_CHARS = 1000;
+export const MAX_REF_HITS = 20;
 export const PRINCIPAL_ID_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 
 const MODES: readonly Mode[] = ['inbox', 'journal', 'read-only'];
@@ -156,7 +169,7 @@ function isInsideLexical(parent: string, child: string): boolean {
 export function parseConfig(raw: unknown, opts: { homeDir?: string } = {}): Config {
   const home = opts.homeDir ?? os.homedir();
   if (!isObject(raw)) throw new ConfigError('config must be a JSON object');
-  checkKeys(raw, ['vaultPath', 'stateDir', 'principal', 'mode', 'limits', 'network', 'scrub', 'embeddings', 'audit', 'journal'], '');
+  checkKeys(raw, ['vaultPath', 'stateDir', 'principal', 'mode', 'limits', 'network', 'scrub', 'embeddings', 'audit', 'journal', 'refs'], '');
 
   const vaultPath = expandHome(requiredStr(raw, 'vaultPath', 'vaultPath'), 'vaultPath', home);
   const stateDir = expandHome(str(raw, 'stateDir', 'stateDir') ?? DEFAULT_STATE_DIR, 'stateDir', home);
@@ -224,6 +237,14 @@ export function parseConfig(raw: unknown, opts: { homeDir?: string } = {}): Conf
     maxTotalMB,
   };
 
+  const refsRaw = section(raw, 'refs', ['excerptChars', 'maxHits'], false);
+  const refsKey = (key: keyof RefsConfig, max: number): number => {
+    const v = refsRaw[key] === undefined ? DEFAULT_REFS[key] : refsRaw[key];
+    if (typeof v !== 'number' || !Number.isInteger(v) || v < 1 || v > max) throw new ConfigError(`config key "refs.${key}" must be an integer from 1 to ${max}`);
+    return v;
+  };
+  const refs: RefsConfig = { excerptChars: refsKey('excerptChars', MAX_REF_EXCERPT_CHARS), maxHits: refsKey('maxHits', MAX_REF_HITS) };
+
   return {
     vaultPath,
     stateDir,
@@ -235,6 +256,7 @@ export function parseConfig(raw: unknown, opts: { homeDir?: string } = {}): Conf
     embeddings: { provider },
     audit: { maxSegmentMB },
     journal,
+    refs,
   };
 }
 

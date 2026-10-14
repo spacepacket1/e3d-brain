@@ -256,7 +256,28 @@ keys and invalid values are errors (I10).
   archive notes hold whole scrubbed conversations, so heuristic scrubber
   misses (Phase 7 residuals) persist in the vault, and anything that syncs
   the vault carries them.
-- `accept --edit` is the only process spawn so far (`src/exec/editor.ts`):
+- Reference library (Phase 11, I1, I3, I5, I7): `ebrain refs add|remove|reindex`
+  are owner CLI commands; MCP only reads `refs.db` (opened read-only per
+  call, from `src/mcp/` through `src/refs/db.ts` only). Source files are
+  opened with `openExternalFile` and their own directory as the named root,
+  and are never written. EPUBs go through the Phase 10 zip reader (same entry
+  name, count, and size limits; nothing extracted to disk); XHTML becomes
+  text through the in-repo tokenizer `src/refs/xml.ts`, which drops scripts,
+  styles, and embedded media, skips doctypes (no entity expansion, no XXE),
+  and never fetches a URL (hrefs are resolved only to archive entry names).
+  Book text is scrubbed (non-strict redaction, also for agent principals)
+  before it is stored, and is stored only in `<stateDir>/refs.db` (`0600`),
+  never in the vault or `index.db`; the vault note per book holds metadata
+  only. `search` caps book hits and excerpts (`refs.maxHits`,
+  `refs.excerptChars`) and `read_ref_chunk` returns one fenced, capped chunk
+  per call. Residual: book text sits in the state dir in clear (like the
+  index), and heuristic scrubber misses persist there.
+- `pdftotext` (`src/exec/pdftotext.ts`) is spawned by its fixed name with an
+  argument array (`-enc UTF-8 -q <file> -`), `shell: false`, a minimal
+  environment (`PATH` only), a 60-second timeout (SIGKILL), and a 64 MiB
+  output cap. Residual: which `pdftotext` runs is decided by the owner's
+  `PATH`, and the binary itself parses the (untrusted) PDF.
+- `accept --edit` is a process spawn (`src/exec/editor.ts`):
   the owner's `$VISUAL`/`$EDITOR`, restricted to a single program name or
   absolute path, spawned with an argument array and `shell: false`, with the
   note path as its only argument. Residual: the editor is whatever program

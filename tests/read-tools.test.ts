@@ -178,7 +178,7 @@ describe('read tools through dispatch (in-process)', () => {
       const r2 = await dispatch(ctx, 'search', { query: 'alphaword', format: 'compact' });
       assert.match(r2.content[0]!.text, /"count":2/, 'refreshIndex ran before the read');
       for (const bad of [{}, { query: '' }, { query: 'x', limit: 0 }, { query: 'x', limit: 51 }, { query: 'x', format: 'tiny' },
-        { query: 'x', status: 'bogus' }, { query: 'x', principal: 'p' }, { query: 'x', scope: 'refs' }]) {
+        { query: 'x', status: 'bogus' }, { query: 'x', principal: 'p' }, { query: 'x', scope: 'books' }]) {
         const r = await dispatch(ctx, 'search', bad);
         assert.equal(r.isError, true, JSON.stringify(bad));
       }

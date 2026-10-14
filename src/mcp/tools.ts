@@ -1,4 +1,6 @@
 // The MCP read tools (Phase 6): search, read_note, list_notes, related.
+// `search` gains `scope` in Phase 11 (notes, raw, refs, all): reference-book
+// passages come from `<stateDir>/refs.db`, opened read-only per call.
 // Available in every mode. Each is registered through `registerTool`
 // (dispatch is the only path to a handler), calls `refreshIndex()` before it
 // reads, and orders results only through `rank()` (I13).
@@ -19,7 +21,8 @@ import {
 import { effectiveTier, HIDDEN_STATUSES, rank, type RankItem, type TierOrHidden } from '../index/rank.js';
 import { nfc, type FolderClass } from '../vault/names.js';
 import { decodeNote, isIsoDate, revOf, STATUSES } from '../vault/parse.js';
-import { readFileWithStatSafe, resolveInVault, SafePathError } from '../safe-path.js';
+import { readFileWithStatSafe, resolveInVault, SafePathError, type SafePath } from '../safe-path.js';
+import { openRefsDbReadOnly, refCitation, refLabel, searchRefChunks, type RefHit } from '../refs/db.js';
 import type { Mode } from '../config.js';
 import { MODES, registerTool, ToolRejection, type ReturnedNote, type ToolRegistry, type ToolResult } from './dispatch.js';
 import { fence, truncateText } from './fence.js';
@@ -39,6 +42,17 @@ export const RELATED_LIMIT = { default: 10, max: 50 };
 
 export type Format = 'full' | 'compact';
 
+/** `search` scopes (Phase 11): vault notes (default; raw archive included at T6), only the raw archive, only reference books, or both. */
+export const SEARCH_SCOPES = ['notes', 'raw', 'refs', 'all'] as const;
+export type SearchScope = (typeof SEARCH_SCOPES)[number];
+
+/** Where `search` finds reference books, and its per-call output limits (config `refs`). */
+export interface RefsEnv {
+  stateDir: SafePath;
+  excerptChars: number;
+  maxHits: number;
+}
+
 export interface ReadToolEnv {
   vaultPath: string;
   index: IndexHandle;
@@ -46,6 +60,8 @@ export interface ReadToolEnv {
   mode?: Mode;
   /** Clock for the default `as_of` (tests inject one). */
   now?: () => Date;
+  /** The reference library (Phase 11); without it `scope: refs` finds nothing. */
+  refs?: RefsEnv;
 }
 
 // ---- schemas ----
@@ -90,6 +106,13 @@ export const SEARCH_SCHEMA: ObjectSchema = {
     advanced: {
       type: 'boolean',
       description: 'Pass the query to SQLite FTS5 unescaped (operators, phrases, prefixes). Default false: the query is plain words.',
+    },
+    scope: {
+      type: 'string',
+      enum: SEARCH_SCOPES,
+      description:
+        'What to search: "notes" (default: vault notes), "raw" (only the raw conversation archive), "refs" (only reference books: ' +
+        'short excerpts with ref: citations; read more with read_ref_chunk), or "all" (notes, then books). Note filters apply to notes only.',
     },
     max_chars: MAX_CHARS_SCHEMA,
     format: FORMAT_SCHEMA,
@@ -195,12 +218,18 @@ export const RAW_NOTICE =
   'Results labeled "raw-archive" (kind "raw") are imported conversation transcripts, ranked below curated notes; they record what was said, ' +
   'not established facts.';
 
-/** `{notice}` when any listed row lives in the inbox, the journal, or the raw archive, else nothing. */
-function proposedNotice(rows: readonly Pick<NoteRow, 'folder_class'>[]): Record<string, unknown> {
+/** Header notice on any result list that contains reference-book passages (Phase 11). */
+export const REFS_NOTICE =
+  'Results with source "ref" are short excerpts of reference books the owner added; cite them by their ref: citation and read more ' +
+  'with read_ref_chunk. They are reference material, not the owner\'s own notes.';
+
+/** `{notice}` when any listed row lives in the inbox, the journal, or the raw archive (or `refs`: book passages are listed), else nothing. */
+function proposedNotice(rows: readonly Pick<NoteRow, 'folder_class'>[], refs = false): Record<string, unknown> {
   const notices: string[] = [];
   if (rows.some((r) => r.folder_class === 'inbox')) notices.push(PROPOSED_NOTICE);
   if (rows.some((r) => r.folder_class === 'journal')) notices.push(JOURNAL_NOTICE);
   if (rows.some((r) => r.folder_class === 'raw')) notices.push(RAW_NOTICE);
+  if (refs) notices.push(REFS_NOTICE);
   return notices.length === 0 ? {} : { notice: notices.join(' ') };
 }
 
@@ -433,7 +462,7 @@ function measure(lines: readonly string[], source: string | undefined): number {
 export function listResponse(
   tool: string,
   format: Format,
-  items: readonly { fields: Record<string, unknown>; excerpt?: string }[],
+  items: readonly { fields: Record<string, unknown>; excerpt?: string; returned?: ReturnedNote }[],
   maxChars: number,
   extra: Record<string, unknown> = {},
 ): ToolResult {
@@ -466,8 +495,8 @@ export function listResponse(
       next = line(it, excerpt);
     }
     lines.push(next);
-    const id = String(it.fields['id']);
-    const rev = String(it.fields['rev']);
+    const id = it.returned?.id ?? String(it.fields['id']);
+    const rev = it.returned?.rev ?? String(it.fields['rev']);
     if (!seen.has(`${id}@${rev}`)) {
       seen.add(`${id}@${rev}`);
       returned.push({ id, rev });
@@ -486,18 +515,62 @@ function excerptOf(text: string, format: Format, fullChars: number): string {
 
 // ---- handlers ----
 
+/** Reference-book matches as rank items (ordered among themselves as `reference` notes, after every note; rank.ts). */
+function refCandidates(env: ReadToolEnv, match: string, advanced: boolean): (RankItem & { ref: RefHit })[] {
+  if (env.refs === undefined) return [];
+  const db = openRefsDbReadOnly(env.refs.stateDir);
+  if (db === undefined) return [];
+  try {
+    let hits: RefHit[];
+    try {
+      hits = searchRefChunks(db, match);
+    } catch (err) {
+      if (advanced) throw new ToolRejection({ type: 'invalid', detail: 'advanced query is not valid FTS5 syntax' });
+      throw err;
+    }
+    return hits.map((h) => ({
+      ref: h,
+      path: `${h.ref_id}/${String(h.chapter).padStart(10, '0')}`,
+      ordinal: h.ordinal,
+      folderClass: 'reference' as const,
+      bm25: h.bm25,
+      source: 'ref' as const,
+    }));
+  } finally {
+    db.close();
+  }
+}
+
+function refItem(h: RefHit, tier: TierOrHidden, format: Format, excerptChars: number) {
+  const fields: Record<string, unknown> = {
+    source: 'ref',
+    ref_id: h.ref_id,
+    chapter: h.chapter,
+    ordinal: h.ordinal,
+    tier,
+    label: refLabel(h.title, h.chapter, h.chapter_heading),
+    citation: refCitation(h.ref_id, h.chapter, h.ordinal),
+  };
+  if (h.heading !== null && h.heading !== h.chapter_heading) fields['heading'] = h.heading;
+  if (format === 'full') Object.assign(fields, { title: h.title, book_author: h.author });
+  const excerpt = truncateText(h.snippet, Math.min(excerptChars, format === 'compact' ? COMPACT_EXCERPT_CHARS : excerptChars));
+  return { fields, excerpt, returned: { id: h.ref_id, rev: h.chunk_rev } };
+}
+
 function search(env: ReadToolEnv, args: Record<string, unknown>, maxChars: number): ToolResult {
   const format = formatArg(args);
+  const scope = (typeof args['scope'] === 'string' ? args['scope'] : 'notes') as SearchScope;
   const vis = visibilityArgs(args, env);
   const folder = folderArg(env, args);
   const tags = Array.isArray(args['tags']) ? (args['tags'] as string[]).map(normalizeTag) : [];
   const query = args['query'] as string;
   const advanced = bool(args, 'advanced');
+  const limit = limitArg(args, SEARCH_LIMIT);
   const { db } = refreshed(env);
 
   const match = advanced ? query : ftsQuery(query);
   let hits: ReturnType<typeof searchChunks> = [];
-  if (match !== undefined) {
+  if (match !== undefined && scope !== 'refs') {
     try {
       hits = searchChunks(db, match);
     } catch (err) {
@@ -506,23 +579,37 @@ function search(env: ReadToolEnv, args: Record<string, unknown>, maxChars: numbe
     }
   }
   const tagMap = tags.length > 0 ? tagsByPath(db) : undefined;
-  const candidates = hits
+  const notes = hits
+    .filter((h) => scope !== 'raw' || h.folder_class === 'raw')
     .filter((h) => inFolder(h.path, folder) && isVisible(h, vis))
     .filter((h) => tagMap === undefined || tags.every((t) => (tagMap.get(h.path) ?? []).includes(t)))
     .map((h) => rankItem({ row: h as NoteRow, hit: h, ordinal: h.ordinal, bm25: h.bm25 }));
-  const ranked = rank(candidates, { includeHidden: true }).slice(0, limitArg(args, SEARCH_LIMIT));
-  const items = ranked.map(({ item, tier }) => {
-    const headingPath = JSON.parse(item.hit.heading_path) as string[];
+  const refs = match !== undefined && (scope === 'refs' || scope === 'all') ? refCandidates(env, match, advanced) : [];
+  // Notes first, then books (rank.ts); at most `limit` notes and min(limit, refs.maxHits) book passages.
+  const ranked = rank<RankItem & { row?: NoteRow; hit?: (typeof hits)[number]; ref?: RefHit }>([...notes, ...refs], { includeHidden: true });
+  const refLimit = Math.min(limit, env.refs?.maxHits ?? 0);
+  const kept = [
+    ...ranked.filter((r) => r.item.ref === undefined).slice(0, limit),
+    ...ranked.filter((r) => r.item.ref !== undefined).slice(0, refLimit),
+  ];
+  const items = kept.map(({ item, tier }) => {
+    if (item.ref !== undefined) return refItem(item.ref, tier, format, env.refs!.excerptChars);
+    const row = item.row!;
+    const hit = item.hit!;
+    const headingPath = JSON.parse(hit.heading_path) as string[];
     const fields = {
-      ...noteFields(item.row, tier),
+      ...noteFields(row, tier),
       heading_path: headingPath,
-      citation: citationFor(item.row, headingPath[headingPath.length - 1]),
+      citation: citationFor(row, headingPath[headingPath.length - 1]),
     };
-    if (format === 'full') Object.assign(fields, { title: item.row.title });
-    const text = format === 'compact' ? item.hit.snippet : item.hit.text;
+    if (format === 'full') Object.assign(fields, { title: row.title });
+    const text = format === 'compact' ? hit.snippet : hit.text;
     return { fields, excerpt: excerptOf(text, format, SEARCH_EXCERPT_CHARS) };
   });
-  return listResponse('search', format, items, maxChars, { matched: candidates.length, ...proposedNotice(ranked.map((r) => r.item.row)) });
+  const noteRows = kept.flatMap((r) => (r.item.row === undefined ? [] : [r.item.row]));
+  const extra: Record<string, unknown> = { matched: notes.length + refs.length };
+  if (scope !== 'notes') extra['scope'] = scope;
+  return listResponse('search', format, items, maxChars, { ...extra, ...proposedNotice(noteRows, noteRows.length < kept.length) });
 }
 
 function readNote(env: ReadToolEnv, args: Record<string, unknown>, maxChars: number): ToolResult {

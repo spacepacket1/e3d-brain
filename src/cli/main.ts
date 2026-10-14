@@ -8,6 +8,7 @@ import { runIndexCommand, runReindex, type CommandResult } from './index-command
 import { runInit, terminalPrompt } from './init.js';
 import { isConversationImportSource, runConversationImport } from './import-commands.js';
 import { runImport, runJournal } from './journal-commands.js';
+import { runRefs } from './refs-commands.js';
 import { runScrub } from './scrub-command.js';
 import { ConfigError, loadConfig } from '../config.js';
 import { runMcpServer } from '../mcp/server.js';
@@ -46,6 +47,13 @@ commands:
   import chatgpt-export <file.zip|dir> [--dry-run]
                     archive a Claude.ai or ChatGPT data export into _raw/conversations/<source>/
                     (--dry-run: print conversation, turn, and scrub-finding counts; write nothing)
+  refs add <file> [--title <t>] [--author <a>]
+                    add a book (.epub, .md, .txt; .pdf needs the external pdftotext) to the reference
+                    library: scrubbed text in <stateDir>/refs.db, one owner note in references/ (re-adding is a no-op)
+  refs list         list the reference library
+  refs remove <ref_id>
+                    remove a book's rows from refs.db (your references/ note stays)
+  refs reindex      rebuild refs.db from the original source files (moved sources are reported missing)
   scrub <file|-> [--strict] [--entropy-threshold <bits>]
                     print the text with secrets redacted; finding counts go to stderr
                     (--strict: agent rules, reject on any credential and exit 3)
@@ -122,6 +130,8 @@ export function main(argv: readonly string[]): number | Promise<number> {
       return emit(runJournal(rest));
     case 'import':
       return isConversationImportSource(rest[0]) ? runConversationImport(rest).then(emit) : emit(runImport(rest));
+    case 'refs':
+      return runRefs(rest).then(emit);
     case 'init':
       return runInitCommand(rest);
     case 'mcp':

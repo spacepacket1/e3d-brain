@@ -21,6 +21,6 @@ count from `npm ls --all`. Adding a dependency requires a line here.
 - `@types/better-sqlite3` 9.6.0: type definitions for `better-sqlite3`. Transitive: 1 (`@types/node`, shared).
 - `@types/yauzl` 3.4.0: type definitions for `yauzl`. Transitive: 1 (`@types/node`, shared).
 
-## Planned (added by the phase that first uses them)
+## XHTML text extraction (Phase 11): in-repo, no dependency
 
-- An XHTML text extractor (Phase 11).
+- EPUB XHTML, OPF, NCX, and nav documents are read by a minimal in-repo tokenizer, `src/refs/xml.ts` (about 300 lines), instead of a parser package such as `htmlparser2`. Justification: text extraction needs only tags, attributes, character references, and raw-text `<script>`/`<style>` handling; a small pure function is easy to audit, adds no transitive packages (Transitive: 0), and by construction cannot fetch URLs or expand external entities (doctypes, including internal subsets, and processing instructions are skipped; only a fixed table of named references and numeric references is decoded). Zip reading reuses `yauzl` (Phase 10). PDFs use the optional external `pdftotext` binary (not a package; see `src/exec/pdftotext.ts`).

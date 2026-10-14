@@ -15,7 +15,7 @@ import { FORBIDDEN_TOOL_NAME } from '../src/mcp/dispatch.js';
 import { realTmpDir, repoRoot, rmrf, treeChecksum } from './helpers.js';
 import { header, McpProcess, results, type ToolResponse } from './mcp-client.js';
 import { fake } from './scrub-fixtures.js';
-import { expectedTools, TOOL_MODES, type ToolMode } from './tool-registry.js';
+import { checkToolsSincePhase, expectedTools, TOOL_MODES, type ToolMode } from './tool-registry.js';
 
 const PHASE = 9;
 const cli = () => path.join(repoRoot(), 'dist', 'src', 'cli', 'main.js');
@@ -94,7 +94,8 @@ describe('ebrain mcp: journal tools by mode', () => {
       const inst = makeInstance(mode);
       await withServers([inst.config], async ([m]) => {
         const listed = await m!.listTools();
-        assert.deepEqual([...listed].sort(), expectedTools(mode, PHASE));
+        // Exactly the phase-9 tools, plus only later-phase registry tools of this mode.
+        assert.equal(checkToolsSincePhase(listed, mode, PHASE), undefined);
         for (const name of listed) assert.ok(!FORBIDDEN_TOOL_NAME.test(name), name);
         for (const name of listed) assert.ok(!/accept|promote|edit|delete|move|overwrite|run|job|start/.test(name), name);
         assert.equal(listed.includes('journal_append'), mode === 'journal');

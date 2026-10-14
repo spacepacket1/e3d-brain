@@ -99,12 +99,13 @@ any mode.
 
 | Tool | Arguments |
 |---|---|
-| `search` | `query`, `limit?` (default 10, max 50), `tags?` (all must match), `folder?`, `status?` (one or many), `include_superseded?`, `include_archived?`, `as_of?`, `advanced?`, `max_chars?`, `format?` |
+| `search` | `query`, `limit?` (default 10, max 50), `tags?` (all must match), `folder?`, `status?` (one or many), `include_superseded?`, `include_archived?`, `as_of?`, `advanced?`, `scope?` (`notes` (default), `raw`, `refs`, `all`; see Reference library), `max_chars?`, `format?` |
 | `read_note` | `path`, `max_chars?`, `format?` |
 | `list_notes` | `folder?`, `tag?`, `limit?` (default 50, max 200), `status?`, `include_superseded?`, `include_archived?`, `as_of?`, `max_chars?`, `format?` |
 | `related` | `path`, `limit?` (default 10, max 50), `max_chars?`, `format?`: backlinks, outgoing links, notes sharing tags |
 | `capture` (inbox mode) | `title`, `body`, `kind?` (`fact`, `decision`, `preference`, `idea` (default), `lesson`, `reference`), `sources?` (citations, at most 50): proposes a note in `_inbox/` (see Inbox) |
 | `list_inbox` (inbox mode) | `limit?` (default 50, max 200), `max_chars?`, `format?`: proposals waiting for review, with citations |
+| `read_ref_chunk` | `ref_id`, `chapter`, `ordinal` (the parts of a `ref:<ref_id>/<chapter>/<ordinal>` citation), `max_chars?`, `format?`: one passage of a reference book, with `prev`/`next` citations (see Reference library) |
 | `journal_append` (journal mode) | `title`, `body`, `kind?` (`log` (default), `observation`, `lesson`, `decision`, `todo`), `sources?` (citations, at most 50), `untrusted_origin?` (needs a source): creates a new entry under `journal/<principal-id>/` (see Agents) |
 | `journal_list` (journal mode) | `since?` (ISO date), `kind?`, `limit?` (default 20, max 200), `max_chars?`, `format?`: your own entries, newest first within each tier |
 
@@ -186,12 +187,15 @@ Optional keys may be omitted to take their defaults.
 | `journal.maxEntryChars` | no | `4000` | integer 1-100000; longest `journal_append` body (longer is rejected, never truncated) |
 | `journal.maxEntriesPerHour` | no | `60` | integer 1-100000; entries per rolling hour, counted from file names in the journal directory |
 | `journal.maxTotalMB` | no | `100` | number above 0; total size of `journal/<principal-id>/` (stat sizes) |
+| `refs.excerptChars` | no | `400` | integer 1-1000; longest excerpt per reference-book hit in `search` (compact format: at most 200) |
+| `refs.maxHits` | no | `5` | integer 1-20; most reference-book hits per `search` call (also bounded by `limit`) |
 
 Later phases add keys here in the same change that adds them to the schema.
 
 ## State directory
 
-`stateDir` holds derived and private data (index, audit log). It is created
+`stateDir` holds derived and private data (index, audit log, the reference
+library `refs.db`). It is created
 with mode `0700`; files the tool creates are `0600`. It is never synced
 between machines and never placed inside the vault.
 
@@ -379,6 +383,57 @@ ebrain import chatgpt-export <file.zip|dir> [--dry-run]        # ChatGPT data ex
 vault. If the vault is synced (iCloud, Dropbox, Syncthing) or kept in git,
 so are your conversations. Exclude `_raw/` from sync or git if that is not
 what you want; the scrubber is heuristic and can miss secrets.
+
+## Reference library (books)
+
+Owner CLI commands (never MCP) that add books you choose to a searchable,
+citable library:
+
+```bash
+ebrain refs add <file.epub|.md|.txt|.pdf> [--title <title>] [--author <author>]
+ebrain refs list
+ebrain refs remove <ref_id>      # removes the index rows; your references/ note stays
+ebrain refs reindex              # rebuild refs.db from the original source files
+```
+
+- **Book text is never stored in the vault.** It goes only to
+  `<stateDir>/refs.db` (a separate derived database, `0600`), table
+  `refs_chunks` keyed by `(ref_id, chapter, ordinal)`, together with the
+  title, author, chapter headings, and the source file's absolute path and
+  SHA-256. `ebrain reindex` (the note index) never touches `refs.db`.
+- The vault gets one small note per book, `references/<slug>.md`: title,
+  `book_author`, `source_path`, `source_sha256`, `ref_id`, and a "My notes"
+  section for your own notes. It is created once and never overwritten (a
+  different book whose title gives the same slug gets `<slug>-<id8>.md`).
+- `ref_id` is `ref_` plus the first 32 hex characters of the file's SHA-256:
+  the same file always gets the same id, and re-adding it (from any path) is
+  a no-op.
+- Formats: EPUB (chapters follow the spine; chapter titles from the
+  navigation document or the chapter's headings; scripts, styles, and
+  external resources are ignored and nothing is fetched), Markdown (chapters
+  at the shallowest repeated heading level), plain text (chapters at lines
+  like `CHAPTER IV.`), and PDF through the optional external `pdftotext`
+  binary (poppler-utils, found on `PATH`; 60-second timeout, 64 MiB output
+  cap). Without `pdftotext`, PDFs are refused with a message.
+- EPUBs are read in memory with the same zip limits as conversation exports
+  (unsafe entry names, more than 50,000 entries, or oversized entries reject
+  the whole file).
+- All book text (title, author, headings, paragraphs) is scrubbed (redacted,
+  never rejected) before it is stored; `refs add` prints the finding counts.
+- Over MCP, `search` with `scope: "refs"` returns at most `refs.maxHits`
+  passages (default 5) with excerpts of at most `refs.excerptChars`
+  characters (default 400), each with a `label` (`Title, Chapter N
+  (heading)`) and a `citation` (`ref:<ref_id>/<chapter>/<ordinal>`).
+  `scope: "all"` lists notes first, then books; `scope: "raw"` searches only
+  the raw conversation archive; the default `scope: "notes"` searches vault
+  notes (raw archive included, ranked T6). `read_ref_chunk` returns one
+  passage (about 1,200 characters) per call, fenced and capped like any note.
+- `refs reindex` rebuilds every book from its source file. Sources come from
+  `refs.db` and from the `references/` notes, so deleting `refs.db` and
+  running `refs reindex` restores it. A source that moved is reported
+  `missing` and one whose content changed is reported `changed` (its rows are
+  kept); the command then exits 1. Books removed with `refs remove` are not
+  brought back while `refs.db` remembers the removal.
 
 ## Auditing
 
