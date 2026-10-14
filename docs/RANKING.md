@@ -42,8 +42,12 @@ A total function, evaluated in this order:
 An absent status skips steps 1 to 3. A note moved out of `_inbox/` by hand is
 `curated` and therefore T1 whatever its `status` says (including
 `proposed`); a note inside `_inbox/` is T2 even if it claims `accepted`.
-A "well-formed citation" is a `sources` entry accepted by the Phase 3
-citation grammar (`parseCitation`); validity beyond format is not checked.
+A "well-formed citation" (T3, Phase 9) is a `sources` entry of kind
+`thesis`, `outcome`, `commit`, or `note` that the Phase 3 citation grammar
+accepts (`parseCitation`); a `url:` or `ref:` source records provenance but
+does not ground a lesson. Resolution against external evidence is not
+checked. Journal entries in every tier are labeled `agent-journal` in
+results (and `untrusted_origin` where the entry says so).
 
 Hidden notes are dropped from results. Filters in Phase 6 reveal them; when
 revealed they are placed after T8.
@@ -63,6 +67,10 @@ Results are compared by, in order:
 4. **Path:** bytewise on the NFC form of the vault path, then bytewise on the
    raw name (the listing order of Phase 2, `comparePaths`).
 5. **Ordinal:** the chunk ordinal within the note.
+
+`journal_list` (Phase 9) passes `newestFirst`: after rule 3, entries with a
+later `created` come first (absent or unparseable `created` last), then rules
+4 and 5. Every other tool uses the rules above unchanged.
 
 The result is fully deterministic: the same vault, config, and query give the
 same order on every platform.

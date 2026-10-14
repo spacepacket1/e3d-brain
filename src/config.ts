@@ -25,6 +25,19 @@ export interface Config {
   scrub: { extraPatterns: string[] };
   embeddings: { provider: EmbeddingsProvider };
   audit: { maxSegmentMB: number };
+  journal: JournalConfig;
+}
+
+/** Journal-mode limits (Phase 9). Enforced server-side by rejecting, never truncating. */
+export interface JournalConfig {
+  /** Days from `created` to `expires` on a new entry. */
+  ttlDays: number;
+  /** Longest entry body, in characters. */
+  maxEntryChars: number;
+  /** Entries per principal per rolling hour. */
+  maxEntriesPerHour: number;
+  /** Total size of the principal's journal directory, in MB. */
+  maxTotalMB: number;
 }
 
 export interface LoadedConfig {
@@ -47,6 +60,7 @@ export const MAX_CHARS_CEILING = 10000;
 /** Audit log segment size before a new segment starts (Phase 5). */
 export const DEFAULT_AUDIT_SEGMENT_MB = 50;
 const MAX_AUDIT_SEGMENT_MB = 4096;
+export const DEFAULT_JOURNAL: Readonly<JournalConfig> = { ttlDays: 90, maxEntryChars: 4000, maxEntriesPerHour: 60, maxTotalMB: 100 };
 export const PRINCIPAL_ID_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 
 const MODES: readonly Mode[] = ['inbox', 'journal', 'read-only'];
@@ -142,7 +156,7 @@ function isInsideLexical(parent: string, child: string): boolean {
 export function parseConfig(raw: unknown, opts: { homeDir?: string } = {}): Config {
   const home = opts.homeDir ?? os.homedir();
   if (!isObject(raw)) throw new ConfigError('config must be a JSON object');
-  checkKeys(raw, ['vaultPath', 'stateDir', 'principal', 'mode', 'limits', 'network', 'scrub', 'embeddings', 'audit'], '');
+  checkKeys(raw, ['vaultPath', 'stateDir', 'principal', 'mode', 'limits', 'network', 'scrub', 'embeddings', 'audit', 'journal'], '');
 
   const vaultPath = expandHome(requiredStr(raw, 'vaultPath', 'vaultPath'), 'vaultPath', home);
   const stateDir = expandHome(str(raw, 'stateDir', 'stateDir') ?? DEFAULT_STATE_DIR, 'stateDir', home);
@@ -192,6 +206,24 @@ export function parseConfig(raw: unknown, opts: { homeDir?: string } = {}): Conf
     throw new ConfigError(`config key "audit.maxSegmentMB" must be a number above 0 and at most ${MAX_AUDIT_SEGMENT_MB}`);
   }
 
+  const journalRaw = section(raw, 'journal', ['ttlDays', 'maxEntryChars', 'maxEntriesPerHour', 'maxTotalMB'], false);
+  const intKey = (key: 'ttlDays' | 'maxEntryChars' | 'maxEntriesPerHour', max: number): number => {
+    const v = journalRaw[key] === undefined ? DEFAULT_JOURNAL[key] : journalRaw[key];
+    if (typeof v !== 'number' || !Number.isInteger(v) || v < 1 || v > max) throw new ConfigError(`config key "journal.${key}" must be an integer from 1 to ${max}`);
+    return v;
+  };
+  const maxTotalMB = journalRaw.maxTotalMB === undefined ? DEFAULT_JOURNAL.maxTotalMB : journalRaw.maxTotalMB;
+  // Fractions are allowed (small budgets for testing), like audit.maxSegmentMB.
+  if (typeof maxTotalMB !== 'number' || !Number.isFinite(maxTotalMB) || maxTotalMB <= 0 || maxTotalMB > 1_000_000) {
+    throw new ConfigError('config key "journal.maxTotalMB" must be a number above 0 and at most 1000000');
+  }
+  const journal: JournalConfig = {
+    ttlDays: intKey('ttlDays', 36_500),
+    maxEntryChars: intKey('maxEntryChars', 100_000),
+    maxEntriesPerHour: intKey('maxEntriesPerHour', 100_000),
+    maxTotalMB,
+  };
+
   return {
     vaultPath,
     stateDir,
@@ -202,6 +234,7 @@ export function parseConfig(raw: unknown, opts: { homeDir?: string } = {}): Conf
     scrub: { extraPatterns },
     embeddings: { provider },
     audit: { maxSegmentMB },
+    journal,
   };
 }
 

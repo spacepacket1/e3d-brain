@@ -14,6 +14,7 @@ import { ensureStateDir, type LoadedConfig } from '../config.js';
 import { VERSION } from '../version.js';
 import { attachToServer, listTools, ToolRegistry, type DispatchContext } from './dispatch.js';
 import { registerInboxTools } from './inbox-tools.js';
+import { registerJournalTools } from './journal-tools.js';
 import { registerReadTools } from './tools.js';
 
 export const SERVER_NAME = 'e3d-brain';
@@ -45,9 +46,16 @@ export async function runMcpServer(opts: McpServerOptions): Promise<void> {
   const index = openIndex({ vaultPath: config.vaultPath, stateDir });
 
   const registry = new ToolRegistry();
-  registerReadTools({ vaultPath: config.vaultPath, index }, registry);
+  registerReadTools({ vaultPath: config.vaultPath, index, mode: config.mode }, registry);
   // capture and list_inbox exist in inbox mode only (Phase 8, I2).
   if (config.mode === 'inbox') registerInboxTools({ vaultPath: config.vaultPath, index, extraPatterns: config.scrub.extraPatterns }, registry);
+  // journal_append and journal_list exist in journal mode only (Phase 9, I2; journal mode requires an agent principal).
+  if (config.mode === 'journal' && config.principal.type === 'agent') {
+    registerJournalTools(
+      { vaultPath: config.vaultPath, stateDir, index, limits: config.journal, extraPatterns: config.scrub.extraPatterns },
+      registry,
+    );
+  }
   const ctx: DispatchContext = {
     mode: config.mode,
     principal: { ...config.principal },

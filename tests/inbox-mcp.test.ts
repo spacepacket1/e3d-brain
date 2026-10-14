@@ -15,7 +15,7 @@ import { FORBIDDEN_TOOL_NAME } from '../src/mcp/dispatch.js';
 import { splitFrontmatter } from '../src/vault/parse.js';
 import { materializeFixture, realTmpDir, repoRoot, rmrf, treeChecksum } from './helpers.js';
 import { header, McpProcess, results, type ToolResponse } from './mcp-client.js';
-import { expectedTools, loadToolRegistry, TOOL_MODES, type ToolMode } from './tool-registry.js';
+import { checkToolsSincePhase, expectedTools, loadToolRegistry, TOOL_MODES, type ToolMode } from './tool-registry.js';
 
 const PHASE = 8;
 const cli = () => path.join(repoRoot(), 'dist', 'src', 'cli', 'main.js');
@@ -85,7 +85,8 @@ describe('ebrain mcp: inbox tools by mode', () => {
       try {
         await m.initialize();
         const listed = await m.listTools();
-        assert.deepEqual([...listed].sort(), expectedTools(mode, PHASE));
+        // Exactly the phase-8 tools, plus only later-phase registry tools of this mode.
+        assert.equal(checkToolsSincePhase(listed, mode, PHASE), undefined);
         for (const name of listed) assert.ok(!FORBIDDEN_TOOL_NAME.test(name), name);
         assert.equal(listed.includes('capture'), mode === 'inbox');
         assert.equal(listed.includes('list_inbox'), mode === 'inbox');

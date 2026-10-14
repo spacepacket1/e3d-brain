@@ -127,9 +127,11 @@ describe('lock', () => {
   it('rejects unsafe lock names', () => {
     const { base, state } = stateDir();
     try {
-      for (const name of ['', '../x', 'a/b', 'A', '.hidden', 'x'.repeat(65)]) {
+      for (const name of ['', '../x', 'a/b', 'A', '.hidden', '_x', 'x'.repeat(81)]) {
         assert.throws(() => acquireLock(state, name), (e) => e instanceof LockError && e.code === 'invalid', name);
       }
+      // journal-<principal-id> (Phase 9): the longest principal id with underscores fits.
+      withLock(state, `journal-${'a_'.repeat(32)}`, () => undefined, { waitMs: 0 });
     } finally {
       rmrf(base);
     }

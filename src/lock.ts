@@ -27,7 +27,8 @@ export const LOCKS_DIR = 'locks';
 export const STALE_LOCK_MS = 60_000;
 export const DEFAULT_LOCK_WAIT_MS = 10_000;
 const POLL_MS = 10;
-const LOCK_NAME_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
+// Room for `journal-<principal-id>` (Phase 9): principal ids allow `_` and run to 64 characters.
+const LOCK_NAME_RE = /^[a-z0-9][a-z0-9_-]{0,79}$/;
 
 export class LockError extends Error {
   constructor(
@@ -67,7 +68,7 @@ function sleep(ms: number): void {
 }
 
 function lockPaths(stateDir: SafePath, name: string): { dir: SafePath; lock: SafePath; breaker: SafePath } {
-  if (!LOCK_NAME_RE.test(name)) throw new LockError('invalid', 'lock name must be lowercase letters, digits, and dashes');
+  if (!LOCK_NAME_RE.test(name)) throw new LockError('invalid', 'lock name must be lowercase letters, digits, dashes, and underscores');
   const dir = resolveInState(stateDir, LOCKS_DIR);
   return {
     dir,

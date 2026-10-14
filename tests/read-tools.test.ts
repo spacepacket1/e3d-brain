@@ -24,7 +24,7 @@ function row(over: Partial<NoteRow> = {}): NoteRow {
   return {
     path: 'n.md', id: 'abc', provisional: 0, rev: '0123456789abcdef', title: 'T', folder_class: 'curated', folder_hidden: 0,
     status: null, status_known: 1, kind: null, occurred: null, valid_from: null, valid_until: null, superseded_at: null,
-    archived_at: null, sources: '[]', ...over,
+    archived_at: null, sources: '[]', created: null, expires: null, author: null, untrusted_origin: null, ...over,
   };
 }
 

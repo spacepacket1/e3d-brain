@@ -162,6 +162,27 @@ export function setMeta(db: Db, key: string, value: string): void {
   db.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value').run(key, value);
 }
 
+const sleeper = new Int32Array(new SharedArrayBuffer(4));
+
+/**
+ * Switch to WAL. Two processes opening a fresh index at once (several MCP
+ * servers starting together) can get SQLITE_BUSY from this pragma without the
+ * busy handler being consulted, so it is retried for up to the busy timeout.
+ */
+function setWal(db: Db): void {
+  const deadline = Date.now() + BUSY_TIMEOUT_MS;
+  for (;;) {
+    try {
+      db.pragma('journal_mode = WAL');
+      return;
+    } catch (err) {
+      const code = (err as { code?: unknown }).code;
+      if ((code !== 'SQLITE_BUSY' && code !== 'SQLITE_LOCKED') || Date.now() >= deadline) throw err;
+      Atomics.wait(sleeper, 0, 0, 10);
+    }
+  }
+}
+
 /**
  * Open (creating if needed) the index. The file is pre-created 0600 (I8);
  * SQLite gives its -wal and -shm files the same mode. An index written by a
@@ -182,7 +203,7 @@ export function openIndexDb(stateDir: SafePath, opts: { mustExist?: boolean } = 
   try {
     db = new Database(file, { fileMustExist: true });
     db.pragma(`busy_timeout = ${BUSY_TIMEOUT_MS}`);
-    db.pragma('journal_mode = WAL');
+    setWal(db);
     db.pragma('synchronous = NORMAL');
   } catch (err) {
     throw new IndexError(`cannot open index ${file}: ${err instanceof Error ? err.message : String(err)}; ` +

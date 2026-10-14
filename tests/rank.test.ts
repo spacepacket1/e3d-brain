@@ -197,6 +197,7 @@ const ORDER_ALLOWED: Record<string, string> = {
   'src/index/query.ts': 'match candidates in listing order (unranked)',
   'src/audit/audit.ts': 'audit segments in numeric order',
   'src/scrub/detectors.ts': 'scrub spans in text-offset order; literals longest first',
+  'src/journal/import.ts': 'workspace daily-note files in name (date) order',
 };
 const ORDER_PATTERNS = [/\.sort\s*\(/, /\.toSorted\s*\(/, /\.reverse\s*\(/, /\.toReversed\s*\(/, /\bORDER\s+BY\b/i];
 const RELEVANCE_ORDER = /\bORDER\s+BY\b[^;`'"]*\b(?:bm25|rank|score|relevance)\b/i;

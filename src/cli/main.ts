@@ -6,6 +6,7 @@ import { runDoctor } from './doctor.js';
 import { runInbox } from './inbox-commands.js';
 import { runIndexCommand, runReindex, type CommandResult } from './index-commands.js';
 import { runInit, terminalPrompt } from './init.js';
+import { runImport, runJournal } from './journal-commands.js';
 import { runScrub } from './scrub-command.js';
 import { ConfigError, loadConfig } from '../config.js';
 import { runMcpServer } from '../mcp/server.js';
@@ -31,6 +32,12 @@ commands:
                     move a proposal to <folder> (default notes/) with status: accepted
   inbox reject <id> [--reason <text>]
                     move a proposal to _inbox/_rejected/ with status: rejected
+  journal prune [--dry-run]
+                    move journal entries past their expires date to journal/_archive/<principal-id>/
+                    (never deletes; --dry-run lists only)
+  import agent-workspace <dir> --principal <id>
+                    import MEMORY.md, memory/YYYY-MM-DD.md, GOALS.md (and SOUL.md, TOOLS.md) into
+                    journal/<id>/imported/ (strict scrub; idempotent; <id> must be the configured principal)
   scrub <file|-> [--strict] [--entropy-threshold <bits>]
                     print the text with secrets redacted; finding counts go to stderr
                     (--strict: agent rules, reject on any credential and exit 3)
@@ -103,6 +110,10 @@ export function main(argv: readonly string[]): number | Promise<number> {
       return emit(runScrub(rest));
     case 'inbox':
       return emit(runInbox(rest));
+    case 'journal':
+      return emit(runJournal(rest));
+    case 'import':
+      return emit(runImport(rest));
     case 'init':
       return runInitCommand(rest);
     case 'mcp':

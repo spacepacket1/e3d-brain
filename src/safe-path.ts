@@ -631,7 +631,13 @@ export function ensurePrivateDir(absPath: string): SafePath {
     cursor = parent;
   }
   for (const dir of missing) {
-    fs.mkdirSync(dir, { mode: DIR_MODE });
+    // Another process (a second MCP server starting at the same time) may create it first.
+    try {
+      fs.mkdirSync(dir, { mode: DIR_MODE });
+    } catch (err) {
+      if (errCode(err) !== 'EEXIST') throw err;
+      continue;
+    }
     fs.chmodSync(dir, DIR_MODE);
   }
   const st = fs.lstatSync(target);
@@ -663,7 +669,13 @@ export function ensureOwnerDir(absPath: string): SafePath {
     cursor = parent;
   }
   for (const dir of missing) {
-    fs.mkdirSync(dir, { mode: DIR_MODE });
+    // Another process (a second MCP server starting at the same time) may create it first.
+    try {
+      fs.mkdirSync(dir, { mode: DIR_MODE });
+    } catch (err) {
+      if (errCode(err) !== 'EEXIST') throw err;
+      continue;
+    }
     fs.chmodSync(dir, DIR_MODE);
   }
   const st = fs.lstatSync(target);

@@ -62,12 +62,18 @@ export interface NoteRow {
   archived_at: string | null;
   /** JSON array. */
   sources: string;
+  created: string | null;
+  expires: string | null;
+  author: string | null;
+  /** 1, 0, or null when absent. */
+  untrusted_origin: number | null;
 }
 
 const NOTE_SELECT = `n.path AS path, n.id AS id, n.provisional AS provisional, n.rev AS rev, n.title AS title,
   n.folder_class AS folder_class, n.folder_hidden AS folder_hidden, n.status AS status, n.status_known AS status_known,
   n.kind AS kind, n.occurred AS occurred, n.valid_from AS valid_from, n.valid_until AS valid_until,
-  n.superseded_at AS superseded_at, n.archived_at AS archived_at, n.sources AS sources`;
+  n.superseded_at AS superseded_at, n.archived_at AS archived_at, n.sources AS sources,
+  n.created AS created, n.expires AS expires, n.author AS author, n.untrusted_origin AS untrusted_origin`;
 
 export interface ChunkHit extends NoteRow {
   ordinal: number;

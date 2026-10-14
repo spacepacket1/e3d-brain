@@ -4,5 +4,7 @@
   { "name": "list_notes", "modes": ["inbox", "journal", "read-only"], "phase": 6 },
   { "name": "related", "modes": ["inbox", "journal", "read-only"], "phase": 6 },
   { "name": "capture", "modes": ["inbox"], "phase": 8 },
-  { "name": "list_inbox", "modes": ["inbox"], "phase": 8 }
+  { "name": "list_inbox", "modes": ["inbox"], "phase": 8 },
+  { "name": "journal_append", "modes": ["journal"], "phase": 9 },
+  { "name": "journal_list", "modes": ["journal"], "phase": 9 }
 ]

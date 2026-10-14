@@ -57,9 +57,22 @@ export interface TierInput {
   sources?: readonly unknown[];
 }
 
-/** True when at least one entry is a well-formed citation (Phase 3 grammar). */
+/**
+ * Citation kinds that ground a journal lesson (T3, Phase 9): verifiable
+ * identifiers. A `url:` or `ref:` source is provenance, not grounding.
+ */
+export const GROUNDING_CITATION_KINDS: readonly string[] = ['thesis', 'outcome', 'commit', 'note'];
+
+/**
+ * True when at least one entry is a well-formed grounding citation: kind
+ * thesis, outcome, commit, or note, accepted by the Phase 3 grammar
+ * (`parseCitation`). Resolution against evidence is not checked.
+ */
 export function hasWellFormedCitation(sources: readonly unknown[] | undefined): boolean {
-  return (sources ?? []).some((s) => parseCitation(s).ok);
+  return (sources ?? []).some((s) => {
+    const parsed = parseCitation(s);
+    return parsed.ok && GROUNDING_CITATION_KINDS.includes(parsed.citation.kind);
+  });
 }
 
 /**
@@ -110,6 +123,8 @@ export interface RankItem extends TierInput {
   bm25?: number;
   /** Reference books (`scope: refs`) always come after notes. */
   source?: 'note' | 'ref';
+  /** `created` (ISO 8601); used only with `newestFirst`. */
+  created?: string | null;
 }
 
 export interface Ranked<T extends RankItem> {
@@ -120,14 +135,24 @@ export interface Ranked<T extends RankItem> {
 export interface RankOptions {
   /** Keep hidden notes (placed after T8). Default false: they are dropped. */
   includeHidden?: boolean;
+  /**
+   * Listings only (`journal_list`, Phase 9): within a tier and relevance,
+   * newer `created` first (absent or unparseable last), before the path rule.
+   */
+  newestFirst?: boolean;
 }
 
 function tierKey(t: TierOrHidden): number {
   return t === 'hidden' ? 9 : t;
 }
 
+function createdKey(item: RankItem): number {
+  const ms = typeof item.created === 'string' ? Date.parse(item.created) : Number.NaN;
+  return Number.isNaN(ms) ? Number.NEGATIVE_INFINITY : ms;
+}
+
 /** Compare two ranked entries by the documented rules (negative: `a` first). */
-export function compareRanked<T extends RankItem>(a: Ranked<T>, b: Ranked<T>): number {
+export function compareRanked<T extends RankItem>(a: Ranked<T>, b: Ranked<T>, opts: RankOptions = {}): number {
   const sa = a.item.source === 'ref' ? 1 : 0;
   const sb = b.item.source === 'ref' ? 1 : 0;
   if (sa !== sb) return sa - sb;
@@ -137,6 +162,11 @@ export function compareRanked<T extends RankItem>(a: Ranked<T>, b: Ranked<T>): n
   const qa = quantize(a.item.bm25 ?? 0);
   const qb = quantize(b.item.bm25 ?? 0);
   if (qa !== qb) return qa < qb ? -1 : 1;
+  if (opts.newestFirst === true) {
+    const ca = createdKey(a.item);
+    const cb = createdKey(b.item);
+    if (ca !== cb) return ca > cb ? -1 : 1;
+  }
   return comparePaths(a.item.path, b.item.path) || (a.item.ordinal ?? 0) - (b.item.ordinal ?? 0);
 }
 
@@ -150,5 +180,5 @@ export function tierOf(item: RankItem): TierOrHidden {
 export function rank<T extends RankItem>(items: readonly T[], opts: RankOptions = {}): Ranked<T>[] {
   const ranked = items.map((item) => ({ item, tier: tierOf(item) }));
   const visible = opts.includeHidden === true ? ranked : ranked.filter((r) => r.tier !== 'hidden');
-  return visible.sort(compareRanked);
+  return visible.sort((a, b) => compareRanked(a, b, opts));
 }

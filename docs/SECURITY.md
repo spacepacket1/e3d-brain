@@ -216,6 +216,27 @@ keys and invalid values are errors (I10).
   writes the destination with `createExclusive` before unlinking the source,
   so a crash can leave a duplicate (reported by `doctor`, finished by
   re-running accept) but never lose the note.
+- Journal (Phase 9, I2): `journal_append` and `journal_list` are registered
+  only in `journal` mode, which the config allows only for an agent
+  principal. `journal_append` has no path argument; `src/journal/store.ts`
+  builds `journal/<principal-id>/<yyyy>/<yyyymmdd-hhmmss>-<slug>.md` from the
+  configured principal id (re-validated), a sanitized slug, and the clock,
+  refuses any symlinked component of that directory chain, and publishes
+  with `createExclusive` (link, never rename): a name collision is an error,
+  never an overwrite or an append. Title, body, and sources are scrubbed
+  under strict agent rules first (a credential rejects the whole entry).
+  Size, rate, total-size, and 24-hour duplicate limits are computed from the
+  journal directory (file-name stamps, `stat` sizes, file bodies), not from
+  the index or audit log, and the whole check-and-create runs under
+  `<stateDir>/locks/journal-<principal-id>.lock`; rejections are audited by
+  limit code only. `ebrain journal prune` (CLI) moves expired entries to
+  `journal/_archive/<principal-id>/` with link+unlink and never deletes.
+  `ebrain import agent-workspace` reads the source only through
+  `openExternalFile` (the workspace is the one allowed root; symlinks out of
+  it are refused), never writes it, and skips any file that trips a strict
+  detector. Residual: journal entries are agent-authored and unreviewed; they
+  are labeled `agent-journal` and ranked below curated and inbox notes, but
+  their content is whatever the agent wrote.
 - `accept --edit` is the only process spawn so far (`src/exec/editor.ts`):
   the owner's `$VISUAL`/`$EDITOR`, restricted to a single program name or
   absolute path, spawned with an argument array and `shell: false`, with the

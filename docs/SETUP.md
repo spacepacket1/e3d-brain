@@ -92,7 +92,8 @@ config file.
 ## MCP tools
 
 Read tools are available in every mode; `capture` and `list_inbox` exist only
-in `inbox` mode (in `journal` and `read-only` mode they are unknown tools).
+in `inbox` mode, and `journal_append` and `journal_list` only in `journal`
+mode (elsewhere they are unknown tools).
 There is no MCP tool to accept, edit, move, delete, or overwrite anything in
 any mode.
 
@@ -104,6 +105,11 @@ any mode.
 | `related` | `path`, `limit?` (default 10, max 50), `max_chars?`, `format?`: backlinks, outgoing links, notes sharing tags |
 | `capture` (inbox mode) | `title`, `body`, `kind?` (`fact`, `decision`, `preference`, `idea` (default), `lesson`, `reference`), `sources?` (citations, at most 50): proposes a note in `_inbox/` (see Inbox) |
 | `list_inbox` (inbox mode) | `limit?` (default 50, max 200), `max_chars?`, `format?`: proposals waiting for review, with citations |
+| `journal_append` (journal mode) | `title`, `body`, `kind?` (`log` (default), `observation`, `lesson`, `decision`, `todo`), `sources?` (citations, at most 50), `untrusted_origin?` (needs a source): creates a new entry under `journal/<principal-id>/` (see Agents) |
+| `journal_list` (journal mode) | `since?` (ISO date), `kind?`, `limit?` (default 20, max 200), `max_chars?`, `format?`: your own entries, newest first within each tier |
+
+In `journal` mode `search` and `list_notes` also accept `include_expired?`
+(journal entries past `expires` are hidden by default in every mode).
 
 - Every call refreshes the index first, so notes added or edited in the vault
   are found without a manual `reindex`.
@@ -176,6 +182,10 @@ Optional keys may be omitted to take their defaults.
 | `scrub.extraPatterns` | no | `[]` | literal strings (not regexes), case-sensitive, 4-256 characters each, at most 64, no line breaks; redacted as `extra-pattern` (see Scrubbing) |
 | `embeddings.provider` | no | `none` | `none` (other providers are added in Phase 12) |
 | `audit.maxSegmentMB` | no | `50` | number above 0, at most 4096; audit segment size before a new segment starts |
+| `journal.ttlDays` | no | `90` | integer 1-36500; `expires` = `created` + this many days on new journal entries |
+| `journal.maxEntryChars` | no | `4000` | integer 1-100000; longest `journal_append` body (longer is rejected, never truncated) |
+| `journal.maxEntriesPerHour` | no | `60` | integer 1-100000; entries per rolling hour, counted from file names in the journal directory |
+| `journal.maxTotalMB` | no | `100` | number above 0; total size of `journal/<principal-id>/` (stat sizes) |
 
 Later phases add keys here in the same change that adds them to the schema.
 
@@ -386,6 +396,91 @@ health, and network status. `ebrain doctor --strict` additionally fails if:
   (dangling or looping symlinks are warnings).
 
 Run it after `ebrain init` and after changing the config.
+
+## Agents
+
+An autonomous agent gets its own brain in `journal` mode (`principal.type:
+"agent"`). Each agent process launches its own `ebrain mcp` over stdio with
+its own config file, vault, and state dir; two agents never share a journal.
+
+What journal mode does:
+
+- `journal_append` creates one new file per entry,
+  `journal/<principal-id>/<yyyy>/<yyyymmdd-hhmmss>-<slug>.md`, mode `0600`,
+  with frontmatter `id`, `schema: 1`, `author` (from the config, never from
+  the call), `origin: mcp`, `created`, `kind`, `sources`, `untrusted_origin`,
+  `status: journal`, `expires`, and `scrubVersion`. It never edits, appends
+  to, or overwrites an entry; a second entry with the same title in the same
+  second is rejected (`exists`). The index is refreshed after each append,
+  so the entry is searchable at once.
+- Scrubbing is strict: a private key, seed phrase, or API key in the title,
+  body, or sources rejects the whole entry and stores nothing. Public
+  addresses and `0x` transaction hashes are kept.
+- Limits (rejected, never truncated; audited by code `entry-size`, `rate`,
+  `total-size`, `duplicate`): `journal.maxEntryChars`,
+  `journal.maxEntriesPerHour`, `journal.maxTotalMB`, and a duplicate check
+  (same normalized body as one of your entries in the last 24 hours; the
+  error names the existing entry). They are computed from the files in the
+  journal directory under the lock `<stateDir>/locks/journal-<id>.lock`, so
+  they hold with several server processes.
+- Ranking: journal entries come after curated and inbox notes: a `lesson`
+  citing `thesis:`, `outcome:`, `commit:`, or `note:` (T3), other lessons
+  (T4), then other entries (T5). Results are labeled `agent-journal` and,
+  where set, `untrusted_origin`. Entries are never promoted automatically;
+  to make one curated, the owner copies it into the vault by hand.
+- Expiry: entries past `expires` (default 90 days) are hidden from search,
+  `list_notes`, and `journal_list`; `include_expired: true` shows them.
+  `ebrain journal prune` (owner CLI) moves them to
+  `journal/_archive/<principal-id>/<yyyy>/`; `--dry-run` only lists. It never
+  deletes anything.
+
+Importing an existing workspace:
+
+```sh
+ebrain import agent-workspace ~/agents/workspace --principal agent-1
+```
+
+imports `MEMORY.md` (kind `observation`), `memory/YYYY-MM-DD.md` (`log`,
+`occurred` set to the date), `GOALS.md` (`todo`), and `SOUL.md`/`TOOLS.md`
+if present (`reference`) into `journal/agent-1/imported/`. `--principal`
+must equal the configured principal. The source is only read (never
+modified); every file is scrubbed under strict rules and a file that trips a
+detector is skipped whole and listed. Re-running is safe: file names carry
+the content hash, so unchanged files are reported `unchanged`, and a changed
+file is imported as a new entry beside the old one. Imported entries do not
+expire.
+
+Three brains for one agent (one MCP server entry each; each `EBRAIN_CONFIG`
+points at its own config file and vault):
+
+```json
+{
+  "mcpServers": {
+    "journal":  { "command": "/usr/bin/node", "args": ["/opt/e3d-brain/dist/src/cli/main.js", "mcp"],
+                  "env": { "EBRAIN_CONFIG": "/home/agent1/.e3d-brain/journal.json" } },
+    "playbook": { "command": "/usr/bin/node", "args": ["/opt/e3d-brain/dist/src/cli/main.js", "mcp"],
+                  "env": { "EBRAIN_CONFIG": "/home/agent1/.e3d-brain/playbook.json" } },
+    "team":     { "command": "/usr/bin/node", "args": ["/opt/e3d-brain/dist/src/cli/main.js", "mcp"],
+                  "env": { "EBRAIN_CONFIG": "/home/agent1/.e3d-brain/team.json" } }
+  }
+}
+```
+
+- `journal.json`: `"mode": "journal"`, `"principal": {"id": "agent-1",
+  "type": "agent"}`, the agent's private vault, its own `stateDir`.
+- `playbook.json`: `"mode": "read-only"`, a copy of the shared, curated
+  playbook vault.
+- `team.json`: `"mode": "inbox"`, the team brain; the agent can only propose
+  notes there for a person to accept.
+
+Use a different `stateDir` per config. For a heartbeat with a budget of about
+1,000 tokens, set `limits.maxCharsPerCall` low, for example
+`"limits": {"maxCharsPerCall": 3000}` (about 750 tokens per call), in each config and call tools with `"format": "compact"` (citations
+plus 200-character excerpts) and a small `limit` (for example
+`journal_list` with `limit: 5`).
+
+Keep each agent's vault in git (commit on a schedule) so you can diff and
+roll back what it recorded. The server never runs git.
 
 ## Several people, separate brains
 
