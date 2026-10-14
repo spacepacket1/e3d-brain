@@ -317,6 +317,9 @@ Phase 3 (`src/cite/`).
 
 ### Platforms and deployment
 
+- Phases 10 and 11 amend `package-lock.json` and `docs/DEPENDENCIES.md`; any
+  phase may extend the config schema additively (Phase 1 rule) and must update
+  `docs/SETUP.md` in the same change.
 - Build and test on macOS (arm64) and Linux (Ubuntu, x64 or arm64). Every
   `tests/phaseNN.sh` must pass on both; tests must not assume a case-sensitive
   or case-insensitive filesystem, must create vaults under a realpath-resolved
@@ -484,7 +487,9 @@ audited read-only brain), and after Phase 8 (the human-principal product).
   `ebrain doctor` as a collision.
 - **Schema fields.** Parse `status`, `pinned`, `kind`, `occurred`,
   `valid_from`, `valid_until`, `author`, `origin`, `sources`,
-  `untrusted_origin`, `schema` per the Note schema, and compute each note's
+  `untrusted_origin`, `schema`, `expires`, `accepted`, `applied`, `superseded_by`,
+  `superseded_at`, `supersedes`, `archived_at`, `merged_into`, `derived_from`,
+  `scrubVersion` per the Note schema, and compute each note's
   **folder class** (`curated`, `inbox`, `journal`, `raw`, `archive`,
   `reference`) from its path per "Folder and status semantics". Invalid dates
   and unknown statuses are counted, never fatal (I10). Unknown frontmatter keys
@@ -552,7 +557,11 @@ audited read-only brain), and after Phase 8 (the human-principal product).
   provisional ids and rename history, so that dump equality (I11) holds across
   full rebuilds.
 - **Citation grammar (`src/cite/`).** Pure functions `parseCitation`,
-  `formatCitation`, and `checkNoteCitation(cite) -> fresh|stale|missing`.
+  `formatCitation`, and `checkNoteCitation(cite, lookup) -> fresh|stale|missing`, where `lookup` is an
+  injected `(id) => {rev}|undefined` function (the index in production, a stub
+  in unit tests). `parseCitation` accepts every kind including `ref:` (checking
+  a `ref:` against `refs.db` is Phase 11) and a conversation turn-range form
+  `note:<id>@<rev>#turns-<a>-<b>`, which is a reserved `#` fragment.
   Grammar: `note:<id>@<rev>[#<heading>]`, `ref:<ref_id>/<chapter>/<ordinal>`
   (book passages, added in Phase 11), `thesis:<id>`, `outcome:<id>`,
   `commit:<sha>`, `url:<https-url>`. `<id>` matches `[A-Za-z0-9_]+`; `<rev>` is
@@ -635,7 +644,11 @@ any tool exists.
   themselves by the same function and always come after note tiers under
   `scope: all`. Within a tier: BM25 relevance (and vector via RRF when Phase 12
   is on), quantized to 1e-6, then deterministic tie-break (path, ordinal).
-  Later phases add rows with tests; none reorders results elsewhere. The tier
+  Phase 4 implements the **whole** `effectiveTier` function (T1 to T8) and
+  tests it with synthetic index rows; "Registered" in the table means the phase
+  whose end-to-end fixtures first produce notes of that class (Phases 8 to
+  10). Later phases add fixtures, not new reordering code; none reorders
+  results elsewhere. The tier
   table has a test that asserts the exact order above.
 - **Tool registry fixture.** `tests/fixtures/tools-by-mode.json` is the single
   source of truth for MCP tool names. Each entry is `{name, modes, phase}`
@@ -645,12 +658,21 @@ any tool exists.
   a list). Every phase that adds a tool updates the fixture in the same change.
   A test asserts that no tool name in any mode matches
   `/accept|promote|edit|delete|move|overwrite|run|job|start/`.
+- **Lock helper (`src/lock.ts`).** A small cross-process lock (`O_EXCL`
+  lockfile under `<stateDir>/locks/` holding pid and timestamp, bounded wait,
+  stale-lock recovery after 60 seconds), unit-tested with two processes.
+  Phases 5 and 9 use it; nothing else implements locking.
 - **Dispatch (`src/mcp/dispatch.ts`).** Every MCP tool call, in every mode,
   goes through one function that validates arguments against the tool's schema,
   checks that the tool is registered for the instance's mode, calls the tool,
   and passes the result through the fence and size cap. Phase 5 adds the audit
-  line in this function. A scan test asserts that no tool handler is registered
-  with the server except through `dispatch`.
+  line in this function. The contract: a registration API `registerTool({name, modes, schema,
+  handler})`; handlers return a result envelope `{content, recall_id?,
+  returned?: [{id, rev}], count?}`; handlers refuse by throwing a typed
+  `ToolRejection({type, detail})` (limit, strict-scrub, invalid), which
+  `dispatch` converts to a structured MCP error and records for Phase 5. A
+  scan test asserts that no tool handler is registered with the server except
+  through `dispatch`.
 - `docs/RANKING.md` documents the table above and the ordering rules.
 
 ### Acceptance Criteria
@@ -692,7 +714,7 @@ and `read-only` instances; it is not agent-specific.
   `0600`; the server never truncates or rewrites it. When the file exceeds
   `audit.maxSegmentMB` (default 50) the server starts a new segment (the
   rotation decision is taken under a short-lived cross-process lockfile,
-  `<stateDir>/locks/audit.lock`, using the same lock helper as Phase 9)
+  `<stateDir>/locks/audit.lock`, using the shared `src/lock.ts` helper built in Phase 4, which Phase 9 also uses)
   (`audit.jsonl.1`, `.2`, ...), leaving earlier segments untouched; readers
   (`ebrain audit tail|stats` and derived rollups) read all segments in
   numeric order. An owner-run `ebrain audit prune --older-than <days>` may
@@ -746,8 +768,8 @@ and `read-only` instances; it is not agent-specific.
   archived hidden).
 - **Result fields.** Every note-bearing result includes `id`, `provisional`
   (bool), `rev`, `status`, `kind`, `occurred`, `folder_class`, `path`, and
-  `citation` (`note:<id>@<rev>[#heading]`). Every `search`, `related`, and
-  `list_notes` response also includes a `recall_id` (ULID) identifying that
+  `citation` (`note:<id>@<rev>[#heading]`). Every `search`, `related`, `list_notes`, `read_note`, and (Phase 8)
+  `list_inbox` response also includes a `recall_id` (ULID) identifying that
   result set.
 - **Filters.** `as_of` (ISO date) evaluates **lifecycle at that time**:
   results exclude notes whose `valid_until < as_of` or `valid_from > as_of`;
@@ -827,7 +849,7 @@ and `read-only` instances; it is not agent-specific.
 ## Phase 7 - Secret and Sensitive-Data Scrubber
 
 <!-- runner:model=high -->
-<!-- runner:read=src/inbox -->
+<!-- runner:read=src/mcp -->
 <!-- runner:verify=bash tests/phase07.sh -->
 
 ### Requirements
@@ -903,6 +925,7 @@ and `read-only` instances; it is not agent-specific.
 
 <!-- runner:model=high -->
 <!-- runner:read=src/mcp -->
+<!-- runner:read=src/scrub -->
 <!-- runner:verify=bash tests/phase08.sh -->
 
 ### Requirements
@@ -1166,6 +1189,8 @@ launching its own `ebrain mcp` with its own config).
   the owner's vault note), `ebrain refs reindex` (rebuilds `refs.db` from the original source files; sources that moved are reported missing; `ebrain reindex` never touches `refs.db`).
 - Chunking preserves chapter and heading metadata for citation. `read_ref_chunk`
   is a read tool and is added to every mode in the tool registry fixture (`phase: 11`). `ref_id` is a stable function of the source file's SHA-256. Source files are read through `openExternalFile`.
+- Book text passes through the Phase 7 scrubber (non-strict redaction) before
+  it is stored in `refs.db`, per I5; an owner-run `refs add` is not exempt.
 - Dependencies: choose the XHTML text extractor here (a small pinned parser such as `htmlparser2`, or a minimal in-repo tokenizer), justified in `docs/DEPENDENCIES.md`.
 
 ### Acceptance Criteria
