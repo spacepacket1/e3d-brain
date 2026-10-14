@@ -1,0 +1,44 @@
+{
+  "verify": [
+    "set -e; for t in tests/phase*.sh; do bash \"$t\"; done"
+  ],
+  "protected_paths": [
+    "LICENSE",
+    ".github/workflows/**",
+    ".e3d-pilot/**"
+  ],
+  "research_topics": "local-first MCP memory servers, Obsidian vault tooling, agent memory safety",
+  "pr": {
+    "base_branch": "main",
+    "draft": true,
+    "labels": [
+      "e3d-pilot"
+    ],
+    "backend": "auto"
+  },
+  "providers": {
+    "discover": [
+      "claude"
+    ],
+    "ideate": [
+      "claude"
+    ],
+    "draft": "claude",
+    "negotiate": [
+      "claude",
+      "codex"
+    ],
+    "review": [
+      "claude",
+      "codex"
+    ],
+    "execute": "s2c"
+  },
+  "max_diff_files": 25,
+  "max_diff_lines": 600,
+  "docs": "docs/e3d-brain-spec.md",
+  "approval": {
+    "implementation_required": true,
+    "merge_required": true
+  }
+}
