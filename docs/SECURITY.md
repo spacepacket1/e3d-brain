@@ -140,3 +140,25 @@ file that is not owned by the current user or is group- or world-writable.
 The file is realpath'd and must stay inside its own directory, so a config
 path that is a symlink to another directory is refused (fail closed). Unknown
 keys and invalid values are errors (I10).
+
+## Tool dispatch and output fencing (I2, I6)
+
+- Every MCP tool call goes through `dispatch` (`src/mcp/dispatch.ts`). It
+  checks that the tool is registered for the instance's mode (a tool of
+  another mode looks exactly like an unknown tool), validates the arguments
+  against the tool's schema (unknown keys such as `author` or `principal` are
+  always rejected, nothing is coerced, and errors never echo argument
+  values), and passes the result through the fence and the size cap.
+  Handlers refuse with a typed `ToolRejection`; any other exception becomes a
+  generic `internal` error with no stack trace. A scan test fails if any other
+  module wires tool handlers into the MCP server.
+- `registerTool` refuses any name matching
+  `/accept|promote|edit|delete|move|overwrite|run|job|start/`.
+- `src/mcp/fence.ts` wraps untrusted text in a backtick fence one longer than
+  its longest backtick run (minimum 3), after a label saying it is reference
+  data, not instructions, and non-authoritative. Truncation to the cap keeps
+  the closing fence. The cap is at most 10,000 characters (UTF-16 code
+  units), lowered by `limits.maxCharsPerCall` and then by `max_chars`.
+- `src/lock.ts` is the only cross-process lock (`O_EXCL` file under
+  `<stateDir>/locks/`, stale after 60 seconds, broken only under a second
+  exclusive breaker file so a fresh lock is never removed).
