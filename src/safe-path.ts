@@ -485,6 +485,35 @@ export function writeAtomic(p: SafePath, data: string | Uint8Array, opts: WriteO
   }
 }
 
+/**
+ * Append `data` to a regular file with one write(2) on an O_APPEND descriptor
+ * (created with an explicit mode if missing; never truncated, never
+ * followed through a symlink). Concurrent appenders each land whole records
+ * as long as each record is one call. Throws SafePathError('changed') if the
+ * write was short.
+ */
+export function appendSafe(p: SafePath, data: string | Uint8Array, opts: WriteOptions = {}): void {
+  const mode = opts.mode ?? FILE_MODE;
+  const buf = toBuffer(data);
+  revalidateParent(p);
+  let fd: number;
+  try {
+    fd = fs.openSync(p, fs.constants.O_WRONLY | fs.constants.O_APPEND | fs.constants.O_CREAT | fs.constants.O_NOFOLLOW, mode);
+  } catch (err) {
+    if (errCode(err) === 'ELOOP') fail('symlink', 'file is a symlink');
+    throw err;
+  }
+  try {
+    const st = fs.fstatSync(fd);
+    if (!st.isFile()) fail('not-file', 'not a regular file');
+    if ((st.mode & 0o777) !== mode) fs.fchmodSync(fd, mode);
+    const n = fs.writeSync(fd, buf, 0, buf.length);
+    if (n !== buf.length) fail('changed', 'short append');
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
 export interface RenameOptions {
   /** Replace an existing target. Default false: collision throws SafePathError('exists'). */
   overwrite?: boolean;

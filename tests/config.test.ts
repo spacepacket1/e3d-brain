@@ -61,6 +61,13 @@ describe('parseConfig', () => {
     assert.equal(c.stateDir, path.join(home, '.e3d-brain'));
     assert.equal(c.limits.maxCharsPerCall, 10000);
     assert.deepEqual(c.scrub.extraPatterns, []);
+    assert.equal(c.audit.maxSegmentMB, 50);
+  });
+
+  it('validates audit.maxSegmentMB (Phase 5)', () => {
+    assert.equal(parse({ ...valid(), audit: { maxSegmentMB: 0.5 } }).audit.maxSegmentMB, 0.5);
+    for (const v of [0, -1, '50', null, Infinity, 5000]) rejectsWith({ ...valid(), audit: { maxSegmentMB: v } }, /audit\.maxSegmentMB/);
+    rejectsWith({ ...valid(), audit: { maxSegmentMB: 1, keepDays: 3 } }, /unknown config key "audit\.keepDays"/);
   });
 
   it('rejects unknown keys at every level, naming the key', () => {

@@ -195,6 +195,7 @@ const ORDER_ALLOWED: Record<string, string> = {
   'src/index/identity.ts': 'identity passes in listing order',
   'src/index/resolve.ts': 'link resolution candidate choice',
   'src/index/query.ts': 'match candidates in listing order (unranked)',
+  'src/audit/audit.ts': 'audit segments in numeric order',
 };
 const ORDER_PATTERNS = [/\.sort\s*\(/, /\.toSorted\s*\(/, /\.reverse\s*\(/, /\.toReversed\s*\(/, /\bORDER\s+BY\b/i];
 const RELEVANCE_ORDER = /\bORDER\s+BY\b[^;`'"]*\b(?:bm25|rank|score|relevance)\b/i;

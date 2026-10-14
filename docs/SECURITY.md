@@ -159,6 +159,19 @@ keys and invalid values are errors (I10).
   data, not instructions, and non-authoritative. Truncation to the cap keeps
   the closing fence. The cap is at most 10,000 characters (UTF-16 code
   units), lowered by `limits.maxCharsPerCall` and then by `max_chars`.
+- Audit (Phase 5): `dispatch` writes one line per `tools/call` to
+  `<stateDir>/audit.jsonl` (`src/audit/audit.ts`) in every mode, including
+  rejected, invalid, and errored calls; a failed audit write turns the
+  response into an error, so no result is returned unaudited. Lines hold
+  paths, ids, counts, and `{id, rev}` of returned notes; argument strings are
+  redacted unless the tool declared them a path or id and they have that
+  shape (credential-shaped values are redacted regardless); rejection details
+  and unknown tool names are never logged. Files are `O_APPEND`, `0600`,
+  never truncated by the server; rotation happens under the audit lock, and
+  only the owner-run `ebrain audit prune` deletes whole old segments.
+  Residual: a writer that raced a rotation may add a line to the previous
+  segment; a declared id or path argument is logged verbatim if it is
+  id/path-shaped.
 - `src/lock.ts` is the only cross-process lock (`O_EXCL` file under
   `<stateDir>/locks/`, stale after 60 seconds, broken only under a second
   exclusive breaker file so a fresh lock is never removed).

@@ -23,6 +23,7 @@ export interface Config {
   network: { allowedHosts: string[] };
   scrub: { extraPatterns: string[] };
   embeddings: { provider: EmbeddingsProvider };
+  audit: { maxSegmentMB: number };
 }
 
 export interface LoadedConfig {
@@ -42,6 +43,9 @@ export const DEFAULT_STATE_DIR = '~/.e3d-brain';
 export const CONFIG_ENV_VAR = 'EBRAIN_CONFIG';
 /** Hard ceiling for any per-call output budget (I6); config may only lower it. */
 export const MAX_CHARS_CEILING = 10000;
+/** Audit log segment size before a new segment starts (Phase 5). */
+export const DEFAULT_AUDIT_SEGMENT_MB = 50;
+const MAX_AUDIT_SEGMENT_MB = 4096;
 export const PRINCIPAL_ID_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 
 const MODES: readonly Mode[] = ['inbox', 'journal', 'read-only'];
@@ -137,7 +141,7 @@ function isInsideLexical(parent: string, child: string): boolean {
 export function parseConfig(raw: unknown, opts: { homeDir?: string } = {}): Config {
   const home = opts.homeDir ?? os.homedir();
   if (!isObject(raw)) throw new ConfigError('config must be a JSON object');
-  checkKeys(raw, ['vaultPath', 'stateDir', 'principal', 'mode', 'limits', 'network', 'scrub', 'embeddings'], '');
+  checkKeys(raw, ['vaultPath', 'stateDir', 'principal', 'mode', 'limits', 'network', 'scrub', 'embeddings', 'audit'], '');
 
   const vaultPath = expandHome(requiredStr(raw, 'vaultPath', 'vaultPath'), 'vaultPath', home);
   const stateDir = expandHome(str(raw, 'stateDir', 'stateDir') ?? DEFAULT_STATE_DIR, 'stateDir', home);
@@ -177,6 +181,13 @@ export function parseConfig(raw: unknown, opts: { homeDir?: string } = {}): Conf
   const embeddingsRaw = section(raw, 'embeddings', ['provider'], false);
   const provider = oneOf(str(embeddingsRaw, 'provider', 'embeddings.provider') ?? 'none', EMBEDDINGS_PROVIDERS, 'embeddings.provider');
 
+  const auditRaw = section(raw, 'audit', ['maxSegmentMB'], false);
+  const maxSegmentMB = auditRaw.maxSegmentMB === undefined ? DEFAULT_AUDIT_SEGMENT_MB : auditRaw.maxSegmentMB;
+  // Fractions are allowed (small segments for testing); zero and negatives are not.
+  if (typeof maxSegmentMB !== 'number' || !Number.isFinite(maxSegmentMB) || maxSegmentMB <= 0 || maxSegmentMB > MAX_AUDIT_SEGMENT_MB) {
+    throw new ConfigError(`config key "audit.maxSegmentMB" must be a number above 0 and at most ${MAX_AUDIT_SEGMENT_MB}`);
+  }
+
   return {
     vaultPath,
     stateDir,
@@ -186,6 +197,7 @@ export function parseConfig(raw: unknown, opts: { homeDir?: string } = {}): Conf
     network: { allowedHosts },
     scrub: { extraPatterns },
     embeddings: { provider },
+    audit: { maxSegmentMB },
   };
 }
 

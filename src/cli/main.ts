@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // `ebrain` CLI entry point.
 
+import { runAudit } from './audit-commands.js';
 import { runDoctor } from './doctor.js';
 import { runIndexCommand, runReindex, type CommandResult } from './index-commands.js';
 import { VERSION } from '../version.js';
@@ -11,6 +12,10 @@ commands:
   doctor            report platform, config, vault, state dir, and FTS5 status
   reindex [--full]  update the search index from the vault (--full: rebuild from scratch)
   index dump        print a canonical dump of the index contents
+  audit tail [-n N] print the last N audit lines (all segments, oldest first)
+  audit stats       summarize the audit log (segments, outcomes, tools)
+  audit prune --older-than <days>
+                    delete whole audit segments older than <days> (never the current one)
   --version         print the version
   --help            show this help
 
@@ -48,6 +53,8 @@ export function main(argv: readonly string[]): number {
       return emit(runReindex(rest));
     case 'index':
       return emit(runIndexCommand(rest));
+    case 'audit':
+      return emit(runAudit(rest));
     default:
       process.stderr.write(`ebrain: unknown command ${JSON.stringify(command)}\n${USAGE}\n`);
       return 2;

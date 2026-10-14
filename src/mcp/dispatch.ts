@@ -8,13 +8,16 @@
 //      the total size;
 //   5. converts a thrown ToolRejection into a structured MCP error, and any
 //      other exception into a generic one (never a stack trace);
-//   6. reports one DispatchRecord per call through `ctx.onRecord` (the audit
-//      line is written from here in Phase 5).
+//   6. appends exactly one audit line per call to `ctx.audit` (Phase 5;
+//      rejected, invalid, and errored calls included; an audit write failure
+//      turns the response into an error, so no result leaves unaudited),
+//      then reports the DispatchRecord through `ctx.onRecord`.
 //
 // The MCP server (Phase 6) wires its tools/list and tools/call handlers to
 // `listTools` and `dispatch` in this module; a scan test fails if any other
 // module registers a tool handler with the server.
 
+import { summarizeArgs, type AuditArgKinds, type AuditLog } from '../audit/audit.js';
 import type { Mode } from '../config.js';
 import { MAX_CHARS_CEILING } from '../config.js';
 import { fence, truncateText } from './fence.js';
@@ -30,15 +33,21 @@ const MAX_DETAIL = 500;
 
 export type RejectionType = 'limit' | 'strict-scrub' | 'invalid';
 
-/** A handler's refusal. `detail` is shown to the caller: never put note text, query text, or secrets in it. */
+/**
+ * A handler's refusal. `detail` is shown to the caller (never put note text,
+ * query text, or secrets in it) but is not audited; `code` is the short
+ * audited reason: the scrub detector or limit type (`[a-z0-9-]`, max 40).
+ */
 export class ToolRejection extends Error {
   readonly type: RejectionType;
   readonly detail: string;
-  constructor({ type, detail }: { type: RejectionType; detail: string }) {
+  readonly code: string | undefined;
+  constructor({ type, detail, code }: { type: RejectionType; detail: string; code?: string }) {
     super(`${type}: ${detail}`);
     this.name = 'ToolRejection';
     this.type = type;
     this.detail = detail;
+    this.code = code;
   }
 }
 
@@ -72,6 +81,8 @@ export interface ToolDefinition<A = Record<string, unknown>> {
   modes: readonly Mode[];
   description?: string;
   schema: ObjectSchema;
+  /** Top-level arguments whose values may be audited as paths or ids; other strings are redacted. */
+  auditArgs?: AuditArgKinds;
   handler: ToolHandler<A>;
 }
 
@@ -80,6 +91,7 @@ interface RegisteredTool {
   modes: readonly Mode[];
   description: string;
   schema: ObjectSchema;
+  auditArgs: AuditArgKinds;
   handler: ToolHandler;
 }
 
@@ -109,6 +121,10 @@ export function registerTool<A extends Record<string, unknown>>(def: ToolDefinit
   for (const m of def.modes) if (!MODES.includes(m)) throw new Error(`tool "${def.name}" has an unknown mode`);
   if (typeof def.handler !== 'function') throw new Error(`tool "${def.name}" needs a handler`);
   assertToolSchema(def.schema);
+  for (const [key, kind] of Object.entries(def.auditArgs ?? {})) {
+    if (!Object.hasOwn(def.schema.properties, key)) throw new Error(`tool "${def.name}" audits unknown argument "${key}"`);
+    if (kind !== 'path' && kind !== 'id') throw new Error(`tool "${def.name}" has an unknown audit kind`);
+  }
   const tools = toolsOf.get(registry)!;
   if (tools.has(def.name)) throw new Error(`tool "${def.name}" is already registered`);
   tools.set(def.name, {
@@ -116,6 +132,7 @@ export function registerTool<A extends Record<string, unknown>>(def: ToolDefinit
     modes: [...def.modes],
     description: def.description ?? '',
     schema: def.schema,
+    auditArgs: { ...(def.auditArgs ?? {}) },
     handler: def.handler as ToolHandler,
   });
 }
@@ -143,7 +160,10 @@ export interface DispatchRecord {
   outcome: Outcome;
   /** Validated arguments (absent when validation failed). Phase 5 reduces them to paths, ids, and counts. */
   args?: Readonly<Record<string, unknown>>;
-  error?: { type: string; detail: string };
+  /** `code` is the ToolRejection's audited reason, when it gave one. */
+  error?: { type: string; detail: string; code?: string };
+  /** Set when the name was not a tool of this mode (the audit line never echoes it). */
+  unknown_tool?: true;
   result_count?: number;
   bytes_returned: number;
   recall_id?: string;
@@ -156,8 +176,13 @@ export interface DispatchContext {
   /** `limits.maxCharsPerCall` from the instance config. */
   maxCharsPerCall: number;
   registry?: ToolRegistry;
+  /** The audit log; the MCP server always sets it (Phase 5). */
+  audit?: AuditLog;
   onRecord?: (record: DispatchRecord) => void;
 }
+
+/** Detail returned when the audit line could not be written. */
+export const AUDIT_FAILURE_DETAIL = 'audit log unavailable';
 
 /** The MCP `tools/call` result shape. */
 export interface ToolCallResponse {
@@ -229,19 +254,30 @@ export async function dispatch(ctx: DispatchContext, name: unknown, rawArgs: unk
   const registry = ctx.registry ?? defaultRegistry;
   const toolName = typeof name === 'string' ? truncateText(name, 64) : '';
   const base = { tool: toolName, mode: ctx.mode, principal: ctx.principal.id };
+  let tool = typeof name === 'string' ? toolsOf.get(registry)!.get(name) : undefined;
+  if (tool !== undefined && !tool.modes.includes(ctx.mode)) tool = undefined;
   const finish = (record: DispatchRecord, response: ToolCallResponse): ToolCallResponse => {
+    if (ctx.audit !== undefined) {
+      try {
+        ctx.audit.write(record, summarizeArgs(record.args, tool?.schema, tool?.auditArgs));
+      } catch {
+        response = errorResponse('internal', AUDIT_FAILURE_DETAIL);
+      }
+    }
     ctx.onRecord?.(record);
     return response;
   };
-  const fail = (outcome: Outcome, type: string, detail: string, args?: Record<string, unknown>): ToolCallResponse => {
+  const fail = (outcome: Outcome, type: string, detail: string, args?: Record<string, unknown>, code?: string): ToolCallResponse => {
     const response = errorResponse(type, cleanDetail(detail));
-    const record: DispatchRecord = { ...base, outcome, error: response.structuredContent!.error, bytes_returned: Buffer.byteLength(response.content[0]!.text) };
+    const error: DispatchRecord['error'] = { ...response.structuredContent!.error };
+    if (code !== undefined) error.code = code;
+    const record: DispatchRecord = { ...base, outcome, error, bytes_returned: Buffer.byteLength(response.content[0]!.text) };
+    if (tool === undefined) record.unknown_tool = true;
     if (args !== undefined) record.args = args;
     return finish(record, response);
   };
 
-  const tool = typeof name === 'string' ? toolsOf.get(registry)!.get(name) : undefined;
-  if (tool === undefined || !tool.modes.includes(ctx.mode)) return fail('invalid', 'invalid', 'unknown tool');
+  if (tool === undefined) return fail('invalid', 'invalid', 'unknown tool');
 
   const args = rawArgs === undefined || rawArgs === null ? {} : rawArgs;
   const problem = validate(tool.schema, args);
@@ -254,7 +290,7 @@ export async function dispatch(ctx: DispatchContext, name: unknown, rawArgs: unk
     result = await tool.handler(valid, { mode: ctx.mode, principal: { ...ctx.principal }, maxChars });
   } catch (err) {
     if (err instanceof ToolRejection) {
-      return fail(err.type === 'invalid' ? 'invalid' : 'rejected', err.type, err.detail, valid);
+      return fail(err.type === 'invalid' ? 'invalid' : 'rejected', err.type, err.detail, valid, err.code);
     }
     return fail('error', 'internal', 'internal error', valid);
   }

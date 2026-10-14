@@ -44,7 +44,8 @@ a symlink into another directory.
   "limits": { "maxCharsPerCall": 10000 },
   "network": { "allowedHosts": [] },
   "scrub": { "extraPatterns": [] },
-  "embeddings": { "provider": "none" }
+  "embeddings": { "provider": "none" },
+  "audit": { "maxSegmentMB": 50 }
 }
 ```
 
@@ -62,6 +63,7 @@ Optional keys may be omitted to take their defaults.
 | `network.allowedHosts` | no | `[]` | lowercase hostnames (no scheme, port, or wildcard); empty means no network |
 | `scrub.extraPatterns` | no | `[]` | non-empty strings (regular expressions, used by the scrubber in Phase 7) |
 | `embeddings.provider` | no | `none` | `none` (other providers are added in Phase 12) |
+| `audit.maxSegmentMB` | no | `50` | number above 0, at most 4096; audit segment size before a new segment starts |
 
 Later phases add keys here in the same change that adds them to the schema.
 
@@ -114,6 +116,51 @@ notes.
 another network filesystem: several processes (the CLI and any number of MCP
 servers) share `index.db` through SQLite WAL mode, which needs working shared
 memory and POSIX locks.
+
+## Auditing
+
+Every MCP `tools/call`, in every mode (`inbox`, `journal`, `read-only`),
+appends exactly one JSON line to `<stateDir>/audit.jsonl`, including calls
+that were rejected (limits, strict scrubbing), invalid (bad or unknown
+arguments, unknown tools), or that failed. `initialize` and `tools/list` are
+not logged. A line looks like:
+
+```json
+{"ts":"2026-10-14T18:00:00.000Z","principal":"chris","mode":"inbox","tool":"search",
+ "args_summary":{"query":"[redacted]","limit":5},"bytes_returned":1834,"outcome":"ok",
+ "result_count":2,"recall_id":"01J...","returned":[{"id":"01J...","rev":"0123456789abcdef"}]}
+```
+
+- `outcome` is `ok`, `rejected`, `invalid`, or `error`; non-`ok` lines carry
+  `error: {type, code?}`, where `code` is the scrub detector or limit type.
+  Error details shown to the client are not logged.
+- `args_summary` holds paths, ids, and counts only. Numbers, booleans, and
+  fixed enum values are kept; strings appear only for arguments a tool
+  declares as a path or id and only when they have that shape; every other
+  string (query text, note text, anything credential-shaped) is
+  `"[redacted]"`; lists become `{count, items?}`. An unknown tool name is
+  logged as `"(unknown)"`.
+- `returned` lists the `{id, rev}` of returned notes, never their content.
+  Lines are capped at 8 KiB; past the cap the list is cut and
+  `returned_truncated: true` is set.
+- `author` and `principal` are never tool arguments: they come from config,
+  and a call passing either is rejected by schema (and audited).
+- If the audit line cannot be written, the call returns an `internal` error
+  instead of its result.
+
+The file is opened append-only and created `0600`; the server never truncates
+or rewrites it, and several MCP processes may append to it at once (each line
+is one `write`). When the current segment reaches `audit.maxSegmentMB`, a new
+segment starts (`audit.jsonl.1`, `.2`, ...; the decision is taken under
+`<stateDir>/locks/audit.lock`) and earlier segments are left as they are.
+
+```sh
+ebrain audit tail [-n 20]                 # last N lines across all segments, oldest first
+ebrain audit stats                        # segments, line counts, outcomes, tools, principals
+ebrain audit prune --older-than <days>    # delete whole segments last written before <days> ago
+```
+
+`prune` deletes only whole segments, oldest first, and never the current one.
 
 ## Vault versioning
 
