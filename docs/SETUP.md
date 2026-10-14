@@ -339,6 +339,47 @@ applies the agent rules (rejection exits 3 and prints no text);
 `--entropy-threshold <bits>` overrides the threshold. `scrub.extraPatterns`
 from your config applies when a config file exists.
 
+## Importing conversations (raw archive)
+
+Owner CLI commands (never MCP) that copy past conversations into the vault's
+**raw archive**:
+
+```bash
+ebrain import claude-code [--projects-dir <dir>] [--dry-run]   # default ~/.claude/projects/**/*.jsonl
+ebrain import claude-export <file.zip|dir> [--dry-run]         # Claude.ai data export
+ebrain import chatgpt-export <file.zip|dir> [--dry-run]        # ChatGPT data export
+```
+
+- Only real human and assistant text is kept: meta frames, slash-command
+  wrappers, tool calls and results, thinking/reasoning blocks, subagent
+  sidechains, and hidden/system messages are dropped. Unknown fields are
+  ignored; malformed JSONL lines and malformed records are skipped and
+  counted in the summary.
+- Each conversation becomes one file,
+  `_raw/conversations/<source>/<yyyy>/<id>.md`, with frontmatter `schema`,
+  `id`, `title`, `kind: raw`, `source`, `conversation_id`, `started`,
+  `ended`, `occurred` (= `started`), `turns`, `origin: import`, `author`,
+  `created`, and `scrubVersion`. The `id` (`raw_<hash>`) is derived from the
+  source and the conversation id, so re-imports keep identity.
+- Idempotent: re-running an import leaves unchanged conversations
+  byte-identical; a conversation that grew replaces its file atomically.
+- Scrubbing is mandatory (there is no flag to turn it off). The summary
+  prints the conversation, turn, and scrub-finding counts by type;
+  `--dry-run` prints the same counts and writes nothing.
+- Zip exports are read in memory, never extracted to disk. Archives with
+  unsafe entry names (`../`, absolute, backslashes), more than 50,000
+  entries, or oversized entries are rejected whole.
+- Requires a `human` principal; an agent's own history goes through
+  `ebrain import agent-workspace` (see Agents).
+- Raw notes are indexed and searchable, but rank in tier T6 below curated,
+  inbox, and journal notes and are labeled `raw-archive`: they record what
+  was said, not established facts.
+
+**Warning:** the raw archive holds full (scrubbed) conversations inside the
+vault. If the vault is synced (iCloud, Dropbox, Syncthing) or kept in git,
+so are your conversations. Exclude `_raw/` from sync or git if that is not
+what you want; the scrubber is heuristic and can miss secrets.
+
 ## Auditing
 
 Every MCP `tools/call`, in every mode (`inbox`, `journal`, `read-only`),
@@ -521,4 +562,6 @@ For agents and headless use (for example on AWS):
 ## Vault versioning
 
 Keeping the vault in `git` is recommended for diffing and rolling back what an
-agent recorded. `ebrain` never runs git itself.
+agent recorded. `ebrain` never runs git itself. Imported conversations live
+in `_raw/` inside the vault, so a vault in git (or any sync tool) carries
+them too; add `_raw/` to `.gitignore` if you do not want that.

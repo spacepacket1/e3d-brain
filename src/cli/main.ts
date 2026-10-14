@@ -6,6 +6,7 @@ import { runDoctor } from './doctor.js';
 import { runInbox } from './inbox-commands.js';
 import { runIndexCommand, runReindex, type CommandResult } from './index-commands.js';
 import { runInit, terminalPrompt } from './init.js';
+import { isConversationImportSource, runConversationImport } from './import-commands.js';
 import { runImport, runJournal } from './journal-commands.js';
 import { runScrub } from './scrub-command.js';
 import { ConfigError, loadConfig } from '../config.js';
@@ -38,6 +39,13 @@ commands:
   import agent-workspace <dir> --principal <id>
                     import MEMORY.md, memory/YYYY-MM-DD.md, GOALS.md (and SOUL.md, TOOLS.md) into
                     journal/<id>/imported/ (strict scrub; idempotent; <id> must be the configured principal)
+  import claude-code [--projects-dir <dir>] [--dry-run]
+                    archive Claude Code transcripts (default ~/.claude/projects) into
+                    _raw/conversations/claude-code/ (scrubbed; idempotent; human principal only)
+  import claude-export <file.zip|dir> [--dry-run]
+  import chatgpt-export <file.zip|dir> [--dry-run]
+                    archive a Claude.ai or ChatGPT data export into _raw/conversations/<source>/
+                    (--dry-run: print conversation, turn, and scrub-finding counts; write nothing)
   scrub <file|-> [--strict] [--entropy-threshold <bits>]
                     print the text with secrets redacted; finding counts go to stderr
                     (--strict: agent rules, reject on any credential and exit 3)
@@ -113,7 +121,7 @@ export function main(argv: readonly string[]): number | Promise<number> {
     case 'journal':
       return emit(runJournal(rest));
     case 'import':
-      return emit(runImport(rest));
+      return isConversationImportSource(rest[0]) ? runConversationImport(rest).then(emit) : emit(runImport(rest));
     case 'init':
       return runInitCommand(rest);
     case 'mcp':

@@ -24,6 +24,12 @@ produce notes of that tier; Phase 4 implements and tests the whole function.
 
 The status column is descriptive. The normative rule is the function below.
 
+T6 holds the raw archive (`_raw/`): conversation transcripts written by
+`ebrain import claude-code|claude-export|chatgpt-export` (Phase 10) with
+`kind: raw`. They are searchable but rank below every curated, inbox, and
+journal note; results carry the label `raw-archive` and the list header a
+notice that they record what was said, not established facts.
+
 ## `effectiveTier(folder_class, status)`
 
 A total function, evaluated in this order:

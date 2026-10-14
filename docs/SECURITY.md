@@ -237,6 +237,25 @@ keys and invalid values are errors (I10).
   detector. Residual: journal entries are agent-authored and unreviewed; they
   are labeled `agent-journal` and ranked below curated and inbox notes, but
   their content is whatever the agent wrote.
+- Conversation importers (Phase 10, I1, I5): `ebrain import claude-code`,
+  `claude-export`, and `chatgpt-export` are owner CLI commands (no MCP tool)
+  and refuse to run for an `agent` principal. Sources are read only through
+  `openExternalFile` with the caller-named root (the projects directory, the
+  export directory, or the zip's own directory); symlinked transcripts are
+  skipped and sources are never written. Zip exports are never extracted to
+  disk: `src/import/zip.ts` feeds `yauzl` positional reads of the validated
+  descriptor, rejects the whole archive on any entry name that is absolute,
+  has a drive letter, backslash, control character, or a `.`/`..`/empty
+  segment (zip-slip), on more than 50,000 entries, on any entry declaring
+  more than 512 MiB or a declared total above 16 GiB, and on an entry whose
+  inflated bytes exceed its declared size or the cap (zip bombs, lying
+  headers). Every title and turn is scrubbed (mandatory, no flag) before
+  rendering; output goes only to `_raw/conversations/<source>/<yyyy>/` via
+  `createExclusive` (new) or `writeAtomic` (update), refusing symlinked
+  directories, under `<stateDir>/locks/raw-archive.lock`. Residual: raw
+  archive notes hold whole scrubbed conversations, so heuristic scrubber
+  misses (Phase 7 residuals) persist in the vault, and anything that syncs
+  the vault carries them.
 - `accept --edit` is the only process spawn so far (`src/exec/editor.ts`):
   the owner's `$VISUAL`/`$EDITOR`, restricted to a single program name or
   absolute path, spawned with an argument array and `shell: false`, with the

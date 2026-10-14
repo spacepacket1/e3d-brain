@@ -9,7 +9,8 @@ import { SafePathError } from '../safe-path.js';
 import type { CommandResult } from './index-commands.js';
 
 export const JOURNAL_USAGE = `usage: ebrain journal prune [--dry-run]`;
-export const IMPORT_USAGE = `usage: ebrain import agent-workspace <dir> --principal <id>`;
+export const IMPORT_USAGE = `usage: ebrain import agent-workspace <dir> --principal <id>
+       ebrain import claude-code|claude-export|chatgpt-export ... (see ebrain --help)`;
 
 export interface JournalCommandOptions extends EnvOptions {
   now?: () => Date;

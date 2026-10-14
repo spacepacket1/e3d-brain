@@ -234,6 +234,8 @@ export interface ExternalFile {
   readonly stat: fs.Stats;
   readBuffer(): Buffer;
   readText(): string;
+  /** Up to `length` bytes at `position` (positional read; fewer only at end of file). */
+  readAt(position: number, length: number): Buffer;
   close(): void;
 }
 
@@ -276,6 +278,18 @@ export function openExternalFile(absPath: string, allowedRoots: readonly string[
       return fs.readFileSync(fd);
     },
     readText: () => handle.readBuffer().toString('utf8'),
+    readAt: (position, length) => {
+      if (!open) fail('invalid', 'file is closed');
+      if (!Number.isSafeInteger(position) || !Number.isSafeInteger(length) || position < 0 || length < 0) fail('invalid', 'bad read range');
+      const buf = Buffer.alloc(length);
+      let got = 0;
+      while (got < length) {
+        const n = fs.readSync(fd, buf, got, length - got, position + got);
+        if (n === 0) break;
+        got += n;
+      }
+      return got === length ? buf : buf.subarray(0, got);
+    },
     close: () => {
       if (open) {
         open = false;
