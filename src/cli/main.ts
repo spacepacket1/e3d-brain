@@ -4,12 +4,19 @@
 import { runAudit } from './audit-commands.js';
 import { runDoctor } from './doctor.js';
 import { runIndexCommand, runReindex, type CommandResult } from './index-commands.js';
+import { runInit, terminalPrompt } from './init.js';
+import { ConfigError, loadConfig } from '../config.js';
+import { runMcpServer } from '../mcp/server.js';
 import { VERSION } from '../version.js';
 
 const USAGE = `usage: ebrain <command>
 
 commands:
-  doctor            report platform, config, vault, state dir, and FTS5 status
+  init [flags]      write config.json, create the state dir and vault folders, print MCP snippets
+                    (--vault, --principal, --type, --mode, --state-dir, --config; prompts on a terminal)
+  mcp               run the MCP server over stdio (stdout carries protocol frames only)
+  doctor [--strict] report platform, config, vault, state dir, and FTS5 status
+                    (--strict: also fail on remote hosts, loose state perms, escaping vault symlinks)
   reindex [--full]  update the search index from the vault (--full: rebuild from scratch)
   index dump        print a canonical dump of the index contents
   audit tail [-n N] print the last N audit lines (all segments, oldest first)
@@ -27,7 +34,31 @@ function emit(r: CommandResult): number {
   return r.code;
 }
 
-export function main(argv: readonly string[]): number {
+async function runInitCommand(args: readonly string[]): Promise<number> {
+  const terminal = process.stdin.isTTY ? terminalPrompt() : undefined;
+  try {
+    return emit(await runInit(args, terminal === undefined ? {} : { prompt: terminal.prompt }));
+  } finally {
+    terminal?.close();
+  }
+}
+
+async function runMcp(args: readonly string[]): Promise<number> {
+  if (args.length > 0) {
+    process.stderr.write(`ebrain mcp: unexpected argument ${JSON.stringify(args[0])}\n`);
+    return 2;
+  }
+  try {
+    await runMcpServer({ loaded: loadConfig() });
+    return 0;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    process.stderr.write(`ebrain mcp: ${err instanceof ConfigError ? 'config: ' : ''}${msg}\n`);
+    return 1;
+  }
+}
+
+export function main(argv: readonly string[]): number | Promise<number> {
   const [command, ...rest] = argv;
   switch (command) {
     case '--version':
@@ -41,11 +72,13 @@ export function main(argv: readonly string[]): number {
       process.stdout.write(`${USAGE}\n`);
       return command === undefined ? 1 : 0;
     case 'doctor': {
-      if (rest.length > 0) {
-        process.stderr.write(`ebrain doctor: unexpected argument ${JSON.stringify(rest[0])}\n`);
+      const strict = rest[0] === '--strict';
+      const extra = strict ? rest.slice(1) : rest;
+      if (extra.length > 0) {
+        process.stderr.write(`ebrain doctor: unexpected argument ${JSON.stringify(extra[0])}\n`);
         return 2;
       }
-      const report = runDoctor();
+      const report = runDoctor({ strict });
       process.stdout.write(`${report.lines.join('\n')}\n`);
       return report.ok ? 0 : 1;
     }
@@ -55,10 +88,25 @@ export function main(argv: readonly string[]): number {
       return emit(runIndexCommand(rest));
     case 'audit':
       return emit(runAudit(rest));
+    case 'init':
+      return runInitCommand(rest);
+    case 'mcp':
+      return runMcp(rest);
     default:
       process.stderr.write(`ebrain: unknown command ${JSON.stringify(command)}\n${USAGE}\n`);
       return 2;
   }
 }
 
-process.exitCode = main(process.argv.slice(2));
+const result = main(process.argv.slice(2));
+if (typeof result === 'number') process.exitCode = result;
+else {
+  void result.then(
+    (code) => {
+      process.exitCode = code;
+    },
+    () => {
+      process.exitCode = 1;
+    },
+  );
+}

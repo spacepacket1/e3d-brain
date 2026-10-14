@@ -8,6 +8,8 @@ count from `npm ls --all`. Adding a dependency requires a line here.
 
 - `better-sqlite3` 13.0.3: synchronous SQLite with FTS5 for the derived index (I7); the one native module, ships prebuilds; `npm run build:native` rebuilds it. Transitive: 1 (`node-addon-api`, build-time headers).
 
+- `@modelcontextprotocol/sdk` 1.32.1: the official MCP SDK for the stdio server (Phase 6); only the low-level `Server` and `StdioServerTransport` are used, wired solely through `src/mcp/dispatch.ts` (its HTTP/OAuth modules are never imported). Transitive: 94 (mostly the optional HTTP transport stack: express, hono, cors, jose, ajv, zod).
+
 - `yaml` 2.9.1: YAML 1.2 frontmatter parsing (Phase 2); used with the `core` schema (no custom tags or timestamps), alias expansion capped. Transitive: 0.
 
 ## Development
@@ -18,4 +20,4 @@ count from `npm ls --all`. Adding a dependency requires a line here.
 
 ## Planned (added by the phase that first uses them)
 
-- `@modelcontextprotocol/sdk` (Phase 6), a zip reader (Phase 10), an XHTML text extractor (Phase 11).
+- A zip reader (Phase 10), an XHTML text extractor (Phase 11).

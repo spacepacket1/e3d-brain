@@ -3,6 +3,11 @@
 // one short-lived probe file there to test case sensitivity. If the index
 // exists it is refreshed and checked for duplicate ids, missing identities,
 // and frontmatter problems; doctor never creates the index.
+//
+// `--strict` (Phase 6) also fails on: network enabled with a non-loopback
+// host, any group/world-accessible entry anywhere under the state dir, and a
+// vault symlink that escapes the vault root. (Phase 13 adds: auto-hooks
+// installed without a deliberate `captureCheckpoints`.)
 
 import { randomBytes } from 'node:crypto';
 import { duplicateIds, missingIdentities } from '../index/identity.js';
@@ -16,6 +21,7 @@ import {
   readDirSafe,
   resolveInState,
   resolveInVault,
+  SafePathError,
   statSafe,
   unlinkSafe,
   type SafePath,
@@ -173,7 +179,73 @@ function checkIndex(config: Config, lines: string[]): boolean {
   }
 }
 
-export function runDoctor(opts: EnvOptions = {}): DoctorReport {
+/** Hosts that never leave the machine. */
+export function isLoopbackHost(host: string): boolean {
+  return host === 'localhost' || host.endsWith('.localhost') || /^127(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}$/.test(host);
+}
+
+/** Group/world-accessible entries anywhere below the state dir (relative names). */
+function looseStateEntries(dir: SafePath, rel = '', depth = 0): string[] {
+  const out: string[] = [];
+  if (depth > 8) return out;
+  for (const entry of readDirSafe(dir)) {
+    const p = resolveInState(dir, entry.name);
+    const name = rel === '' ? entry.name : `${rel}/${entry.name}`;
+    const st = statSafe(p);
+    if (st === undefined) continue;
+    if ((st.mode & 0o077) !== 0) out.push(name);
+    if (st.isDirectory()) out.push(...looseStateEntries(p, name, depth + 1));
+  }
+  return out;
+}
+
+/** The extra `--strict` checks. Returns false if any fails. */
+function strictChecks(config: Config, lines: string[]): boolean {
+  let ok = true;
+  const remote = config.network.allowedHosts.filter((h) => !isLoopbackHost(h));
+  if (remote.length > 0) {
+    lines.push(`strict network: FAIL non-loopback hosts allowed: ${remote.join(', ')}`);
+    ok = false;
+  } else lines.push('strict network: ok (no non-loopback hosts)');
+
+  try {
+    const loose = looseStateEntries(ensureStateDir(config));
+    if (loose.length > 0) {
+      lines.push(`strict state dir: FAIL group/world-accessible: ${loose.slice(0, MAX_LISTED).join(', ')}`);
+      ok = false;
+    } else lines.push('strict state dir: ok (all entries private)');
+  } catch (err) {
+    lines.push(`strict state dir: FAIL ${message(err)}`);
+    ok = false;
+  }
+
+  try {
+    const scan = scanVault(config.vaultPath);
+    const escaping: string[] = [];
+    const broken: string[] = [];
+    for (const rel of scan.skippedPaths) {
+      try {
+        resolveInVault(config.vaultPath, rel);
+      } catch (err) {
+        if (!(err instanceof SafePathError)) throw err;
+        if (err.code === 'escape') escaping.push(rel);
+        else if (err.code === 'symlink') broken.push(rel);
+      }
+    }
+    if (escaping.length > 0) {
+      lines.push(`strict vault symlinks: FAIL ${escaping.length} escape the vault root`);
+      listSome(escaping, lines, (p) => `escaping symlink: ${JSON.stringify(p)}`);
+      ok = false;
+    } else lines.push('strict vault symlinks: ok (none escape the vault root)');
+    if (broken.length > 0) lines.push(`strict vault symlinks: WARN ${broken.length} dangling or looping`);
+  } catch (err) {
+    lines.push(`strict vault symlinks: FAIL ${message(err)}`);
+    ok = false;
+  }
+  return ok;
+}
+
+export function runDoctor(opts: EnvOptions & { strict?: boolean } = {}): DoctorReport {
   const lines: string[] = [];
   let ok = true;
 
@@ -212,6 +284,7 @@ export function runDoctor(opts: EnvOptions = {}): DoctorReport {
 
   const hosts = config.network.allowedHosts;
   lines.push(hosts.length === 0 ? 'network: disabled' : `network: allowed hosts ${hosts.join(', ')}`);
+  if (opts.strict === true) ok = strictChecks(config, lines) && ok;
 
   return { ok, lines };
 }

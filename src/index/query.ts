@@ -38,3 +38,114 @@ export function matchChunks(db: Db, text: string): ChunkMatch[] {
 export function listNotePaths(db: Db): string[] {
   return (db.prepare('SELECT path FROM notes ORDER BY path_nfc, path').all() as { path: string }[]).map((r) => r.path);
 }
+
+// ---- read-tool queries (Phase 6) ----
+// Unordered candidate sets: the MCP tools filter them and put them in their
+// final order with rank() (I13).
+
+/** The note columns every read-tool result is built from. */
+export interface NoteRow {
+  path: string;
+  id: string;
+  provisional: number;
+  rev: string;
+  title: string;
+  folder_class: string;
+  folder_hidden: number;
+  status: string | null;
+  status_known: number;
+  kind: string | null;
+  occurred: string | null;
+  valid_from: string | null;
+  valid_until: string | null;
+  superseded_at: string | null;
+  archived_at: string | null;
+  /** JSON array. */
+  sources: string;
+}
+
+const NOTE_SELECT = `n.path AS path, n.id AS id, n.provisional AS provisional, n.rev AS rev, n.title AS title,
+  n.folder_class AS folder_class, n.folder_hidden AS folder_hidden, n.status AS status, n.status_known AS status_known,
+  n.kind AS kind, n.occurred AS occurred, n.valid_from AS valid_from, n.valid_until AS valid_until,
+  n.superseded_at AS superseded_at, n.archived_at AS archived_at, n.sources AS sources`;
+
+export interface ChunkHit extends NoteRow {
+  ordinal: number;
+  /** JSON array of heading texts. */
+  heading_path: string;
+  text: string;
+  snippet: string;
+  /** FTS5 bm25(): lower is more relevant. */
+  bm25: number;
+}
+
+/**
+ * Every chunk matching an FTS5 query (already escaped by `ftsQuery`, or the
+ * caller's own syntax in advanced mode), with its BM25 value and a short
+ * snippet. Throws the SQLite error for invalid FTS syntax.
+ */
+export function searchChunks(db: Db, match: string): ChunkHit[] {
+  return db
+    .prepare(
+      `SELECT ${NOTE_SELECT}, c.ordinal AS ordinal, c.heading_path AS heading_path, c.text AS text,
+         snippet(chunks_fts, 0, '', '', '...', 32) AS snippet, bm25(chunks_fts) AS bm25
+       FROM chunks_fts JOIN chunks c ON c.id = chunks_fts.rowid JOIN notes n ON n.path = c.note_path
+       WHERE chunks_fts MATCH ?`,
+    )
+    .all(match) as ChunkHit[];
+}
+
+export function allNoteRows(db: Db): NoteRow[] {
+  return db.prepare(`SELECT ${NOTE_SELECT} FROM notes n`).all() as NoteRow[];
+}
+
+/** The note at `path` exactly, else the single note whose NFC path equals NFC(`path`). */
+export function noteRowByPath(db: Db, path: string): NoteRow | undefined {
+  const exact = db.prepare(`SELECT ${NOTE_SELECT} FROM notes n WHERE n.path = ?`).get(path) as NoteRow | undefined;
+  if (exact !== undefined) return exact;
+  const byNfc = db.prepare(`SELECT ${NOTE_SELECT} FROM notes n WHERE n.path_nfc = ?`).all(path.normalize('NFC')) as NoteRow[];
+  return byNfc.length === 1 ? byNfc[0] : undefined;
+}
+
+/** Tags of every note, keyed by path. */
+export function tagsByPath(db: Db): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  for (const r of db.prepare('SELECT note_path, tag FROM tags ORDER BY tag').all() as { note_path: string; tag: string }[]) {
+    const list = out.get(r.note_path);
+    if (list === undefined) out.set(r.note_path, [r.tag]);
+    else list.push(r.tag);
+  }
+  return out;
+}
+
+/** Text of a note's first chunk (for listing excerpts). */
+export function firstChunkText(db: Db, path: string): string {
+  const row = db.prepare('SELECT text FROM chunks WHERE note_path = ? AND ordinal = 0').get(path) as { text: string } | undefined;
+  return row?.text ?? '';
+}
+
+/** Structural neighbours of a note: who links to it, what it links to, and notes sharing a tag (with the shared tags). */
+export function neighbours(db: Db, path: string): { backlinks: NoteRow[]; outgoing: NoteRow[]; sharedTags: { row: NoteRow; tags: string[] }[] } {
+  const backlinks = db
+    .prepare(`SELECT ${NOTE_SELECT} FROM notes n WHERE n.path IN (SELECT note_path FROM links WHERE resolved_path = ? AND note_path <> ?)`)
+    .all(path, path) as NoteRow[];
+  const outgoing = db
+    .prepare(`SELECT ${NOTE_SELECT} FROM notes n WHERE n.path IN (SELECT resolved_path FROM links WHERE note_path = ? AND resolved_path <> ?)`)
+    .all(path, path) as NoteRow[];
+  const shared = db
+    .prepare('SELECT t2.note_path AS path, t2.tag AS tag FROM tags t1 JOIN tags t2 ON t2.tag = t1.tag AND t2.note_path <> t1.note_path WHERE t1.note_path = ? ORDER BY t2.tag')
+    .all(path) as { path: string; tag: string }[];
+  const tagsOf = new Map<string, string[]>();
+  for (const s of shared) {
+    const list = tagsOf.get(s.path);
+    if (list === undefined) tagsOf.set(s.path, [s.tag]);
+    else list.push(s.tag);
+  }
+  const rowStmt = db.prepare(`SELECT ${NOTE_SELECT} FROM notes n WHERE n.path = ?`);
+  const sharedTags: { row: NoteRow; tags: string[] }[] = [];
+  for (const [p, tags] of tagsOf) {
+    const row = rowStmt.get(p) as NoteRow | undefined;
+    if (row !== undefined) sharedTags.push({ row, tags });
+  }
+  return { backlinks, outgoing, sharedTags };
+}

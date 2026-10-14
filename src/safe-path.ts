@@ -617,3 +617,31 @@ export function ensurePrivateDir(absPath: string): SafePath {
   if ((st.mode & 0o777) !== DIR_MODE) fs.chmodSync(target, DIR_MODE);
   return brand(fs.realpathSync(target));
 }
+
+/**
+ * Make sure an owner-named absolute directory exists (vault root, config
+ * directory for `ebrain init`): missing components are created 0700; an
+ * existing directory is left exactly as it is (never chmod'ed). It must be a
+ * real directory, not a symlink. Returns its realpath.
+ */
+export function ensureOwnerDir(absPath: string): SafePath {
+  if (typeof absPath !== 'string' || absPath.includes('\0') || !path.isAbsolute(absPath)) {
+    fail('invalid', 'directory must be an absolute path');
+  }
+  const target = path.resolve(absPath);
+  const missing: string[] = [];
+  let cursor = target;
+  while (!fs.existsSync(cursor)) {
+    missing.unshift(cursor);
+    const parent = path.dirname(cursor);
+    if (parent === cursor) fail('invalid', 'no existing ancestor');
+    cursor = parent;
+  }
+  for (const dir of missing) {
+    fs.mkdirSync(dir, { mode: DIR_MODE });
+    fs.chmodSync(dir, DIR_MODE);
+  }
+  const st = fs.lstatSync(target);
+  if (st.isSymbolicLink() || !st.isDirectory()) fail('invalid', 'not a real directory');
+  return brand(fs.realpathSync(target));
+}

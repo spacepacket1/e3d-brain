@@ -172,6 +172,23 @@ keys and invalid values are errors (I10).
   Residual: a writer that raced a rotation may add a line to the previous
   segment; a declared id or path argument is logged verbatim if it is
   id/path-shaped.
+- MCP server (Phase 6): `ebrain mcp` serves over stdio with the SDK's
+  low-level `Server`; `attachToServer` in `dispatch.ts` is the only place
+  tools/list and tools/call are wired. stdout carries protocol frames only
+  (stray `console.log` output is redirected to stderr); log lines never
+  contain note text, queries, or arguments, and protocol errors are logged by
+  error name only. Tool output puts all note-derived text (paths, titles,
+  excerpts, bodies) inside the fence; the server-written header holds only
+  the tool name, `recall_id`, and counts. Read handlers validate `path` and
+  `folder` through `resolveInVault`, read only notes present in the index
+  (symlinks are never indexed), and open files with `O_NOFOLLOW`. Plain search
+  queries are reduced to quoted words so FTS5 operators are inert; only
+  `advanced: true` passes FTS5 syntax through. Residual: a `tools/call`
+  whose envelope the SDK itself rejects (for example `arguments` that is not
+  an object) fails at the protocol layer before dispatch and is not audited.
+- `ebrain doctor --strict` fails on non-loopback `allowedHosts`, any
+  group/world-accessible entry under the state dir, and vault symlinks that
+  escape the root.
 - `src/lock.ts` is the only cross-process lock (`O_EXCL` file under
   `<stateDir>/locks/`, stale after 60 seconds, broken only under a second
   exclusive breaker file so a fresh lock is never removed).

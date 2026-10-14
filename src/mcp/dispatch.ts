@@ -14,9 +14,11 @@
 //      then reports the DispatchRecord through `ctx.onRecord`.
 //
 // The MCP server (Phase 6) wires its tools/list and tools/call handlers to
-// `listTools` and `dispatch` in this module; a scan test fails if any other
-// module registers a tool handler with the server.
+// `listTools` and `dispatch` through `attachToServer` in this module; a scan
+// test fails if any other module registers a tool handler with the server.
 
+import type { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { summarizeArgs, type AuditArgKinds, type AuditLog } from '../audit/audit.js';
 import type { Mode } from '../config.js';
 import { MAX_CHARS_CEILING } from '../config.js';
@@ -308,4 +310,19 @@ export async function dispatch(ctx: DispatchContext, name: unknown, rawArgs: unk
   if (result.recall_id !== undefined) record.recall_id = result.recall_id;
   if (result.returned !== undefined) record.returned = result.returned.map((r) => ({ id: r.id, rev: r.rev }));
   return finish(record, response);
+}
+
+/**
+ * Wire an SDK server's tools/list and tools/call to this module (Phase 6):
+ * the only place tool request handlers are set. `initialize` and tools/list
+ * are not tool calls and are not audited.
+ */
+export function attachToServer(server: Server, ctx: DispatchContext): void {
+  server.setRequestHandler(ListToolsRequestSchema, () => ({
+    tools: listTools(ctx.mode, ctx.registry) as unknown as { name: string; inputSchema: { type: 'object' } }[],
+  }));
+  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    const response = await dispatch(ctx, request.params.name, request.params.arguments);
+    return response as unknown as { content: { type: 'text'; text: string }[] };
+  });
 }

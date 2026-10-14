@@ -26,6 +26,113 @@ ebrain --version
 ebrain doctor
 ```
 
+## First-time setup (one person, end to end)
+
+1. Install as above, then create your configuration, state dir, and vault
+   folders with `ebrain init` (it prompts for missing values on a terminal;
+   flags make it non-interactive):
+
+   ```bash
+   ebrain init --vault ~/Brain --principal chris
+   # optional: --type human|agent  --mode inbox|journal|read-only
+   #           --state-dir ~/.e3d-brain  --config ~/.e3d-brain/config.json
+   ```
+
+   `init` writes `config.json` (`0600`; it refuses to overwrite an existing
+   one), creates the state dir (`0700`), creates the vault if missing plus
+   `_inbox/`, `_raw/`, and `references/` (and `journal/<principal-id>/` in
+   `journal` mode), and prints the MCP client snippets below with absolute
+   paths filled in.
+2. Check the setup: `ebrain doctor --strict` (see "Doctor" below).
+3. Optionally build the index now with `ebrain reindex` (the MCP server also
+   builds and refreshes it on demand).
+4. Register the server with your MCP client (next section) and restart the
+   client.
+
+## Connecting Claude (MCP over stdio)
+
+`ebrain mcp` runs the MCP server over stdio: stdout carries protocol frames
+only, and logs go to stderr (they never contain note text, queries, or tool
+arguments). Use **absolute paths** to the node binary and to the installed
+entry script (`dist/src/cli/main.js`), so the client never resolves `node` or
+`ebrain` through its own `PATH`. `ebrain init` prints both snippets with your
+paths.
+
+Claude Code:
+
+```bash
+claude mcp add --scope user e3d-brain -e EBRAIN_CONFIG=/Users/chris/.e3d-brain/config.json \
+  -- /usr/local/bin/node /opt/e3d-brain/dist/src/cli/main.js mcp
+```
+
+Claude Desktop (`claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "e3d-brain": {
+      "command": "/usr/local/bin/node",
+      "args": ["/opt/e3d-brain/dist/src/cli/main.js", "mcp"],
+      "env": { "EBRAIN_CONFIG": "/Users/chris/.e3d-brain/config.json" }
+    }
+  }
+}
+```
+
+**Warning:** `EBRAIN_CONFIG` and the server command can also be set by a
+project-level `.mcp.json` checked into a repository. Mode and principal come
+from whichever config the launching client names, so only approve project MCP
+servers you wrote yourself; a hostile `.mcp.json` could point `ebrain` at a
+different config (another vault, another mode) or run a different command.
+
+To connect several brains (for example a private one and a read-only shared
+playbook), add one server entry per instance, each with its own name and
+config file.
+
+## MCP tools
+
+Read tools, available in every mode (write tools arrive with the inbox and
+journal phases):
+
+| Tool | Arguments |
+|---|---|
+| `search` | `query`, `limit?` (default 10, max 50), `tags?` (all must match), `folder?`, `status?` (one or many), `include_superseded?`, `include_archived?`, `as_of?`, `advanced?`, `max_chars?`, `format?` |
+| `read_note` | `path`, `max_chars?`, `format?` |
+| `list_notes` | `folder?`, `tag?`, `limit?` (default 50, max 200), `status?`, `include_superseded?`, `include_archived?`, `as_of?`, `max_chars?`, `format?` |
+| `related` | `path`, `limit?` (default 10, max 50), `max_chars?`, `format?`: backlinks, outgoing links, notes sharing tags |
+
+- Every call refreshes the index first, so notes added or edited in the vault
+  are found without a manual `reindex`.
+- A response is a JSON header line (`tool`, `recall_id`, `format`, `count`,
+  `omitted`, ...) followed by one fenced block of reference data: JSON Lines
+  (one result per line) for lists, or the metadata line, a blank line, and the
+  note text for `read_note`. Each result carries `id`, `provisional`, `rev`,
+  `status` (the note's status, or `accepted` for a curated or reference note
+  without one), `kind`, `occurred`, `folder_class`, `path`, and `citation`
+  (`note:<id>@<rev>[#heading]`); search results add `heading_path` and an
+  `excerpt`. `recall_id` (a ULID) identifies the result set and appears in the
+  audit line.
+- Size: output never exceeds 10,000 characters, lowered by
+  `limits.maxCharsPerCall` and again by `max_chars` (a larger `max_chars` is
+  clamped). Lists include only whole results that fit; `omitted` counts the
+  rest. `format: "compact"` returns citations and excerpts of at most 200
+  characters.
+- Visibility: notes with status `rejected`, `superseded`, or `archived`, and
+  notes under `_archive/`, `journal/_archive/`, `_inbox/_rejected/`, and
+  `_inbox/_applied/` are hidden by default. `include_superseded` and
+  `include_archived` reveal superseded and archived notes; `status` restricts
+  results to the listed statuses and reveals notes hidden because of a listed
+  status. `as_of` (ISO date, default now) drops notes whose `valid_until` is
+  before it or `valid_from` after it, and shows a superseded/archived note if
+  its `superseded_at`/`archived_at` is later than `as_of`. Dates without a
+  time zone are UTC; a bare `valid_until` date includes that whole day.
+- Search is BM25 (SQLite FTS5). The query is plain words (all must match);
+  FTS syntax in it is inert. `advanced: true` passes the query to FTS5
+  unescaped (`OR`, `NOT`, `"phrases"`, `prefix*`); invalid syntax returns an
+  `invalid` error.
+- `path` arguments are vault-relative and checked by `safe-path`: absolute
+  paths, `..`, hidden names, and symlinks that leave the vault are refused.
+
 ## Configuration
 
 Default location: `~/.e3d-brain/config.json`. Override with the
@@ -161,6 +268,55 @@ ebrain audit prune --older-than <days>    # delete whole segments last written b
 ```
 
 `prune` deletes only whole segments, oldest first, and never the current one.
+
+## Doctor
+
+`ebrain doctor` reports platform, Node, FTS5, config, vault, state dir, index
+health, and network status. `ebrain doctor --strict` additionally fails if:
+
+- `network.allowedHosts` contains a non-loopback host (anything other than
+  `localhost` and `127.x.x.x`);
+- any file or directory under the state dir is group- or world-accessible;
+- the vault contains a symlink that resolves outside the vault root
+  (dangling or looping symlinks are warnings).
+
+Run it after `ebrain init` and after changing the config.
+
+## Several people, separate brains
+
+Each person installs `ebrain` independently, with their own vault, config,
+and state dir, on their own machine or OS user. There is no shared server and
+no shared index: Chris's Claude talks to Chris's brain, Joel's to Joel's.
+
+- Keep a vault in sync between your own machines with a tool of your choice:
+  Obsidian Sync, git, or iCloud Drive.
+- **Never sync the state dir** (`~/.e3d-brain`). The index database is SQLite
+  in WAL mode; a sync tool copying `index.db`, `-wal`, and `-shm` files
+  between machines corrupts it or mixes two machines' views, and the audit log
+  is per machine. Each machine rebuilds its own index from its copy of the
+  vault (`ebrain reindex`), which is cheap and deterministic.
+- Sharing notes with someone else is done by them connecting a separate,
+  `read-only` instance to a copy of the vault, not by sharing a server.
+
+## Running on a Linux server
+
+For agents and headless use (for example on AWS):
+
+1. Build prerequisites for `npm run build:native`:
+   `sudo apt-get install -y build-essential python3 make`.
+2. Install Node.js >= 22, then in the checkout run
+   `npm ci --ignore-scripts && npm run build:native && npm run build`.
+3. Create a dedicated OS user (for example `sudo useradd --system --create-home ebrain`)
+   and run everything as that user; the config file must be owned by it and
+   `chmod 600`.
+4. Put the state dir on a **local** filesystem (not NFS/EFS), mode `0700`
+   (`ebrain init` creates it so).
+5. Sync the vault with git (clone it into the user's home; pull/commit on a
+   schedule). The server never runs git itself.
+6. Obsidian is not installed on servers; `ebrain` only reads and writes
+   plain Markdown.
+7. Run `ebrain doctor --strict` as that user before wiring the agent's MCP
+   client to `node /abs/path/dist/src/cli/main.js mcp`.
 
 ## Vault versioning
 
