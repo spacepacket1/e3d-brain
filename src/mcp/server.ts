@@ -37,11 +37,16 @@ function guardStdout(): void {
   console.debug = toStderr;
 }
 
-/** Serve until stdin closes. Throws before serving if the config, vault, index, or FTS5 is unusable. */
-export async function runMcpServer(opts: McpServerOptions): Promise<void> {
-  const log = opts.log ?? ((line: string) => process.stderr.write(`ebrain mcp: ${line}\n`));
-  guardStdout();
-  const { config } = opts.loaded;
+/** Shared by the stdio and HTTP transports: the registry, audit log, and index for one instance. */
+export interface McpRuntime {
+  ctx: DispatchContext;
+  toolCount: number;
+  close(): void;
+}
+
+/** Throws if the config, vault, index, or FTS5 is unusable. */
+export function createMcpRuntime(loaded: LoadedConfig): McpRuntime {
+  const { config } = loaded;
   const fts = checkFts5();
   if (!fts.ok) throw new Error(`${fts.error}; ${fts.hint}`);
   const stateDir = ensureStateDir(config);
@@ -70,12 +75,25 @@ export async function runMcpServer(opts: McpServerOptions): Promise<void> {
     registry,
     audit: new AuditLog(stateDir, { maxSegmentBytes: segmentBytes(config.audit.maxSegmentMB) }),
   };
+  return { ctx, toolCount: listTools(config.mode, registry).length, close: () => closeIndex(index) };
+}
 
+/** One SDK server wired to the dispatcher; the caller connects a transport. */
+export function createSdkServer(ctx: DispatchContext, log: (line: string) => void): Server {
   const server = new Server({ name: SERVER_NAME, version: VERSION }, { capabilities: { tools: {} } });
   attachToServer(server, ctx);
   // Protocol errors are logged by kind only: their messages can echo request content.
   server.onerror = (err) => log(`protocol error (${err.name})`);
+  return server;
+}
 
+/** Serve until stdin closes. Throws before serving if the config, vault, index, or FTS5 is unusable. */
+export async function runMcpServer(opts: McpServerOptions): Promise<void> {
+  const log = opts.log ?? ((line: string) => process.stderr.write(`ebrain mcp: ${line}\n`));
+  guardStdout();
+  const runtime = createMcpRuntime(opts.loaded);
+  const { config } = opts.loaded;
+  const server = createSdkServer(runtime.ctx, log);
   const stdin = opts.stdin ?? process.stdin;
   const closed = new Promise<void>((resolve) => {
     server.onclose = () => resolve();
@@ -88,11 +106,11 @@ export async function runMcpServer(opts: McpServerOptions): Promise<void> {
     (opts.stdout ?? process.stdout) as NodeJS.WriteStream & typeof process.stdout,
   );
   await server.connect(transport);
-  log(`serving ${listTools(config.mode, registry).length} tools (principal ${config.principal.id}, mode ${config.mode})`);
+  log(`serving ${runtime.toolCount} tools (principal ${config.principal.id}, mode ${config.mode})`);
   try {
     await closed;
   } finally {
-    closeIndex(index);
+    runtime.close();
     log('stopped');
   }
 }

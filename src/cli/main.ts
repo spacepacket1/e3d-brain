@@ -14,6 +14,8 @@ import { runRefs } from './refs-commands.js';
 import { runScrub } from './scrub-command.js';
 import { ConfigError, loadConfig } from '../config.js';
 import { runMcpServer } from '../mcp/server.js';
+import { DEFAULT_HTTP_PORT, startHttpServer } from '../net/http-server.js';
+import { runToken } from './token-command.js';
 import { VERSION } from '../version.js';
 
 const USAGE = `usage: ebrain <command>
@@ -22,6 +24,10 @@ commands:
   init [flags]      write config.json, create the state dir and vault folders, print MCP snippets
                     (--vault, --principal, --type, --mode, --state-dir, --config; prompts on a terminal)
   mcp               run the MCP server over stdio (stdout carries protocol frames only)
+  mcp --http [--host <loopback>] [--port <n>]
+                    serve MCP over Streamable HTTP on loopback only (default 127.0.0.1:8787); needs a bearer token
+  token create --principal <id>
+                    create (or rotate) the HTTP bearer token for this instance's principal; shown once
   doctor [--strict] report platform, config, vault, state dir, and FTS5 status
                     (--strict: also fail on remote hosts, loose state perms, escaping vault symlinks)
   reindex [--full]  update the search index from the vault (--full: rebuild from scratch)
@@ -87,7 +93,35 @@ async function runInitCommand(args: readonly string[]): Promise<number> {
   }
 }
 
+async function runMcpHttp(args: readonly string[]): Promise<number> {
+  let host: string | undefined;
+  let port = DEFAULT_HTTP_PORT;
+  for (let i = 0; i < args.length; i += 2) {
+    const v = args[i + 1];
+    if (args[i] === '--host' && v !== undefined) host = v;
+    else if (args[i] === '--port' && v !== undefined && /^[0-9]{1,5}$/.test(v)) port = Number(v);
+    else {
+      process.stderr.write(`ebrain mcp: unexpected argument ${JSON.stringify(args[i])}\n`);
+      return 2;
+    }
+  }
+  try {
+    const server = await startHttpServer({ loaded: loadConfig(), ...(host === undefined ? {} : { host }), port });
+    await new Promise<void>((resolve) => {
+      const stop = () => void server.close().then(resolve);
+      process.once('SIGINT', stop);
+      process.once('SIGTERM', stop);
+    });
+    return 0;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    process.stderr.write(`ebrain mcp: ${err instanceof ConfigError ? 'config: ' : ''}${msg}\n`);
+    return 1;
+  }
+}
+
 async function runMcp(args: readonly string[]): Promise<number> {
+  if (args[0] === '--http') return runMcpHttp(args.slice(1));
   if (args.length > 0) {
     process.stderr.write(`ebrain mcp: unexpected argument ${JSON.stringify(args[0])}\n`);
     return 2;
@@ -146,6 +180,8 @@ export function main(argv: readonly string[]): number | Promise<number> {
       return emit(runHook(rest));
     case 'propose':
       return runPropose(rest).then(emit);
+    case 'token':
+      return emit(runToken(rest));
     case 'init':
       return runInitCommand(rest);
     case 'mcp':

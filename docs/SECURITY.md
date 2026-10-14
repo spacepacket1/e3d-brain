@@ -281,6 +281,10 @@ keys and invalid values are errors (I10).
   Residual: the provider sees scrubbed conversation text (heuristic scrubber
   misses included), and the transcript is untrusted model input that may try
   to steer extraction; every result is an unrated proposal awaiting review.
+- Optional HTTP transport (Phase 15, I3): `ebrain mcp --http` is off by default, binds loopback only (non-loopback
+  hosts refuse to start), checks `Host`/`Origin`, and needs a per-principal bearer token stored only as a SHA-256 hash
+  and compared in constant time. The token's principal must match the instance's. It is for owner-run tunneling;
+  public exposure is unsupported and there is no OAuth. The server code lives in `src/net/`.
 - Embeddings (Phase 12, I3, I5): off by default (`provider: none` runs no
   `src/net/` code, asserted by a spy test). The Ollama client lives in
   `src/net/`; the base URL must be loopback or in `network.allowedHosts`, which

@@ -207,9 +207,26 @@ Optional keys may be omitted to take their defaults.
 
 Later phases add keys here in the same change that adds them to the schema.
 
+## Optional HTTP transport (loopback, off by default)
+
+`ebrain mcp` speaks stdio. For an owner who wants to reach one instance through their own tunnel (for example
+over a private network), `ebrain mcp --http [--host <loopback>] [--port <n>]` serves MCP over Streamable HTTP at
+`http://127.0.0.1:8787/mcp`. It is stateless, accepts POST only, and every call goes through the same dispatcher
+(mode, fencing, caps, audit) as stdio.
+
+- **Loopback only.** `--host` must be `127.x.x.x`, `localhost`, or `::1`; `0.0.0.0` and any other host are refused
+  before listening. Requests with a non-loopback `Host` or `Origin` header are refused.
+- **Bearer token.** `ebrain token create --principal <id>` prints a token (`ebt_<id>.<32 random bytes, base64url>`)
+  once. Only its SHA-256 is stored, in `<stateDir>/http-tokens.json` (0600); comparison is constant-time. The
+  principal must equal the instance's configured principal, and a token only works against the state dir that holds
+  its hash, so one agent's token cannot be used against another agent's instance. Running the command again
+  rotates the token. Send it as `Authorization: Bearer <token>`.
+- **Warning.** Tunneling is your responsibility. Exposing this port publicly is unsupported. There is no OAuth,
+  no TLS, and no rate limiting here; hosted remote access is a separate, security-reviewed ticket.
+
 ## State directory
 
-`stateDir` holds derived and private data (index, audit log, the `propose` candidate-id ledger, the reference
+`stateDir` holds derived and private data (index, audit log, the `propose` candidate-id ledger, hashed HTTP tokens, the reference
 library `refs.db`). It is created
 with mode `0700`; files the tool creates are `0600`. It is never synced
 between machines and never placed inside the vault.
