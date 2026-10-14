@@ -12,9 +12,12 @@ export type Db = BetterSqlite3.Database;
 export const INDEX_FILE = 'index.db';
 export const BUSY_TIMEOUT_MS = 10000;
 /** Bump when the table layout changes: an index with another version is rebuilt. */
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
-const TABLES = ['meta', 'notes', 'chunks', 'chunks_fts', 'links', 'tags', 'aliases', 'headings', 'problems'];
+const TABLES = [
+  'meta', 'notes', 'chunks', 'chunks_fts', 'links', 'tags', 'aliases', 'headings', 'problems', 'cites', 'note_revisions',
+  'missing_ids',
+];
 
 const SCHEMA = `
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT;
@@ -29,6 +32,10 @@ CREATE TABLE notes (
   ctime_ns TEXT NOT NULL,
   racy INTEGER NOT NULL,          -- mtime too close to the read time to trust the stat key
   hash TEXT NOT NULL,             -- SHA-256 of the raw file bytes
+  rev TEXT NOT NULL,              -- note revision: 16 hex of SHA-256 of the normalized text
+  id TEXT NOT NULL,               -- effective id: fm_id when valid and first in path order, else prov_id
+  provisional INTEGER NOT NULL,   -- id is prov_id
+  prov_id TEXT NOT NULL,          -- provisional identity; follows unambiguous renames and in-place edits
   title TEXT NOT NULL,
   folder_class TEXT NOT NULL,
   folder_hidden INTEGER NOT NULL,
@@ -62,12 +69,16 @@ CREATE TABLE notes (
 CREATE INDEX notes_order ON notes (path_nfc, path);
 CREATE INDEX notes_fold ON notes (path_fold);
 CREATE INDEX notes_basename ON notes (basename_fold);
+CREATE INDEX notes_id ON notes (id);
+CREATE UNIQUE INDEX notes_prov_id ON notes (prov_id);
+CREATE INDEX notes_hash ON notes (hash);
 CREATE TABLE chunks (
   id INTEGER PRIMARY KEY,         -- rowid shared with chunks_fts; not stable across rebuilds
   note_path TEXT NOT NULL,
   ordinal INTEGER NOT NULL,
   heading_path TEXT NOT NULL,     -- JSON array of heading texts
   text TEXT NOT NULL,
+  chunk_rev TEXT NOT NULL,        -- same procedure as rev, over the chunk text
   UNIQUE (note_path, ordinal)
 ) STRICT;
 CREATE VIRTUAL TABLE chunks_fts USING fts5(text, tokenize = 'unicode61 remove_diacritics 2');
@@ -92,6 +103,19 @@ CREATE INDEX aliases_fold ON aliases (alias_fold);
 CREATE TABLE headings (
   note_path TEXT NOT NULL, ordinal INTEGER NOT NULL, level INTEGER NOT NULL, text TEXT NOT NULL, line INTEGER NOT NULL,
   PRIMARY KEY (note_path, ordinal)
+) STRICT;
+-- Note-to-note citations from sources and derived_from (rebuilt with every content change).
+CREATE TABLE cites (
+  from_path TEXT NOT NULL, ordinal INTEGER NOT NULL, from_id TEXT NOT NULL, field TEXT NOT NULL,
+  to_id TEXT NOT NULL, to_rev TEXT NOT NULL, citation TEXT NOT NULL,
+  PRIMARY KEY (from_path, ordinal)
+) STRICT;
+CREATE INDEX cites_to ON cites (to_id);
+-- Every (id, rev) pair seen. Hashes only, never content.
+CREATE TABLE note_revisions (id TEXT NOT NULL, rev TEXT NOT NULL, first_seen TEXT NOT NULL, PRIMARY KEY (id, rev)) STRICT;
+-- Identities that were indexed and are no longer present (rename history; cleared by a full rebuild).
+CREATE TABLE missing_ids (
+  id TEXT PRIMARY KEY, provisional INTEGER NOT NULL, last_path TEXT NOT NULL, last_rev TEXT NOT NULL, since TEXT NOT NULL
 ) STRICT;
 CREATE TABLE problems (
   note_path TEXT NOT NULL, ordinal INTEGER NOT NULL, kind TEXT NOT NULL, field TEXT, detail TEXT NOT NULL,

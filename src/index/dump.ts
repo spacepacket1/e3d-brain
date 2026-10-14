@@ -1,13 +1,14 @@
 // `ebrain index dump`: a canonical text rendering of the index contents for
 // equality tests (I11). Excludes everything that varies between checkouts or
-// rebuilds of the same vault: stat keys, racy flags, chunk rowids, and (from
-// Phase 3) provisional ids and rename history. Notes are in listing order
+// rebuilds of the same vault: stat keys, racy flags, chunk rowids, provisional
+// ids (and so the citing note's id when it is provisional), rename history
+// (`missing_ids`), and revision first-seen times. Notes are in listing order
 // (bytewise NFC path, then raw path); everything inside a note by ordinal.
 
 import type { Db } from './db.js';
 import { findCollisions } from '../vault/names.js';
 
-export const DUMP_HEADER = 'e3d-brain index dump v1';
+export const DUMP_HEADER = 'e3d-brain index dump v2';
 
 const q = (v: string | null): string => (v === null ? 'null' : JSON.stringify(v));
 /** JSON string with every non-ASCII code unit escaped, so normalization differences are visible. */
@@ -32,18 +33,20 @@ export function dumpIndex(db: Db): string {
     const notes = db.prepare('SELECT * FROM notes ORDER BY path_nfc, path').all() as NoteRow[];
     const byNote = (table: string, cols: string) =>
       db.prepare(`SELECT ${cols} FROM ${table} WHERE note_path = ? ORDER BY ordinal`);
-    const chunks = byNote('chunks', 'ordinal, heading_path, text');
+    const chunks = byNote('chunks', 'ordinal, heading_path, text, chunk_rev');
     const links = byNote('links', 'ordinal, line, target, anchor, alias, embed, resolved_path, resolution, candidates');
     const headings = byNote('headings', 'ordinal, level, text, line');
     const problems = byNote('problems', 'ordinal, kind, field, detail');
     const tags = db.prepare('SELECT tag, source FROM tags WHERE note_path = ? ORDER BY tag');
     const aliases = db.prepare('SELECT alias FROM aliases WHERE note_path = ? ORDER BY alias');
+    const cites = db.prepare('SELECT field, citation FROM cites WHERE from_path = ? ORDER BY ordinal');
 
     for (const n of notes) {
       const path = n.path as string;
       out.push(`note ${q(n.path_nfc as string)}`);
       if (n.path !== n.path_nfc) out.push(`  raw ${ascii(path)}`);
       out.push(`  hash ${n.hash} size ${n.size}`);
+      out.push(`  rev ${n.rev} ${n.provisional ? 'id provisional' : `id ${q(n.id as string)}`}`);
       out.push(`  title ${q(n.title as string)}`);
       out.push(`  folder ${n.folder_class}${n.folder_hidden ? ' hidden' : ''}`);
       out.push(`  frontmatter ${n.frontmatter}${n.status !== null && !n.status_known ? ' unknown-status' : ''}`);
@@ -66,8 +69,11 @@ export function dumpIndex(db: Db): string {
       for (const p of problems.all(path) as { kind: string; field: string | null; detail: string }[]) {
         out.push(`  problem ${p.kind} ${p.field ?? '-'} ${q(p.detail)}`);
       }
-      for (const c of chunks.all(path) as { ordinal: number; heading_path: string; text: string }[]) {
-        out.push(`  chunk ${c.ordinal} ${c.heading_path} ${q(c.text)}`);
+      for (const c of chunks.all(path) as { ordinal: number; heading_path: string; text: string; chunk_rev: string }[]) {
+        out.push(`  chunk ${c.ordinal} ${c.chunk_rev} ${c.heading_path} ${q(c.text)}`);
+      }
+      for (const c of cites.all(path) as { field: string; citation: string }[]) {
+        out.push(`  cites ${c.field} ${q(c.citation)}`);
       }
       for (const l of links.all(path) as {
         ordinal: number; line: number; target: string; anchor: string | null; alias: string | null; embed: number;

@@ -93,7 +93,7 @@ describe('parseNote', () => {
       'kind: lesson',
       'occurred: 2024-02-29',
       'expires: 2026-01-01T00:00:00+02:00',
-      'sources: commit:abc',
+      'sources: commit:abc1234',
       'untrusted_origin: true',
       'schema: 1',
       'mystery: {deep: [1, 2]}',
@@ -115,7 +115,7 @@ describe('parseNote', () => {
     assert.equal(n.fields.kind, 'lesson');
     assert.equal(n.fields.occurred, '2024-02-29');
     assert.equal(n.fields.expires, '2026-01-01T00:00:00+02:00');
-    assert.deepEqual(n.fields.sources, ['commit:abc']);
+    assert.deepEqual(n.fields.sources, ['commit:abc1234']);
     assert.equal(n.fields.untrusted_origin, true);
     assert.equal(n.fields.schema, 1);
     assert.deepEqual(n.extra, { mystery: { deep: [1, 2] } });

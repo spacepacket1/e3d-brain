@@ -17,15 +17,18 @@
 
 import { createHash } from 'node:crypto';
 import { getMeta, indexExists, openIndexDb, setMeta, type Db } from './db.js';
+import {
+  assignNewIdentities, clearIdentityHistory, duplicateIds, finishIdentities, snapshotIds, type GoneNote,
+} from './identity.js';
 import { resolveAllLinks } from './resolve.js';
 import { DEFAULT_MAX_CHUNK_CHARS } from '../vault/chunk.js';
 import { findCollisions, folderClass, foldKey, nfc, noteBasename } from '../vault/names.js';
-import { canonicalJson, parseNote, type ParsedNote } from '../vault/parse.js';
+import { canonicalJson, explicitId, parseNote, revOf, type ParsedNote } from '../vault/parse.js';
 import { sameStatKey, scanVault, statKeyOf, type ScanSkips, type StatKey } from '../vault/scan.js';
 import { readFileWithStatSafe, resolveInVault, SafePathError, statBigSafe, type SafePath } from '../safe-path.js';
 
 /** Bump when parsing or chunking output changes: the next refresh rebuilds. */
-export const PARSER_VERSION = 1;
+export const PARSER_VERSION = 2;
 /** Notes larger than this are skipped and counted, never read. */
 export const MAX_NOTE_BYTES = 8 * 1024 * 1024;
 /** A file modified this close to when it was read may change again within the same timestamp tick. */
@@ -139,11 +142,13 @@ function deleteNote(db: Db, path: string): void {
   for (const t of ['chunks', 'links', 'tags', 'aliases', 'headings', 'problems']) {
     db.prepare(`DELETE FROM ${t} WHERE note_path = ?`).run(path);
   }
+  db.prepare('DELETE FROM cites WHERE from_path = ?').run(path);
   db.prepare('DELETE FROM notes WHERE path = ?').run(path);
 }
 
 const NOTE_COLUMNS = [
-  'path', 'path_nfc', 'path_fold', 'basename_fold', 'size', 'mtime_ns', 'ino', 'ctime_ns', 'racy', 'hash', 'title',
+  'path', 'path_nfc', 'path_fold', 'basename_fold', 'size', 'mtime_ns', 'ino', 'ctime_ns', 'racy', 'hash', 'rev', 'id',
+  'provisional', 'prov_id', 'title',
   'folder_class', 'folder_hidden', 'frontmatter', 'fm_id', 'status', 'status_known', 'pinned', 'kind', 'occurred',
   'valid_from', 'valid_until', 'created', 'expires', 'accepted', 'applied', 'superseded_at', 'archived_at', 'author',
   'origin', 'sources', 'untrusted_origin', 'superseded_by', 'supersedes', 'merged_into', 'derived_from',
@@ -154,13 +159,20 @@ function boolInt(v: boolean | null): number | null {
   return v === null ? null : v ? 1 : 0;
 }
 
-function insertNote(db: Db, p: Prepared): void {
+/**
+ * Insert a parsed note under its provisional identity `provId`. The effective
+ * id starts as the explicit id (if valid) and is settled for duplicates by
+ * `finishIdentities` in the same transaction.
+ */
+function insertNote(db: Db, p: Prepared, provId: string): void {
   const n = p.parsed!;
   const f = n.fields;
   const folder = folderClass(p.relPath);
+  const explicit = explicitId(f.id);
   const values: unknown[] = [
     p.relPath, nfc(p.relPath), foldKey(p.relPath), foldKey(noteBasename(p.relPath)), p.stat.size, p.stat.mtimeNs,
-    p.stat.ino, p.stat.ctimeNs, p.racy ? 1 : 0, p.hash, n.title, folder.folderClass, folder.hidden ? 1 : 0,
+    p.stat.ino, p.stat.ctimeNs, p.racy ? 1 : 0, p.hash, n.rev, explicit ?? provId, explicit === null ? 1 : 0, provId,
+    n.title, folder.folderClass, folder.hidden ? 1 : 0,
     n.frontmatter, f.id, f.status, n.statusKnown ? 1 : 0, boolInt(f.pinned), f.kind, f.occurred, f.valid_from,
     f.valid_until, f.created, f.expires, f.accepted, f.applied, f.superseded_at, f.archived_at, f.author, f.origin,
     canonicalJson(f.sources), boolInt(f.untrusted_origin), f.superseded_by, canonicalJson(f.supersedes),
@@ -168,10 +180,10 @@ function insertNote(db: Db, p: Prepared): void {
   ];
   db.prepare(`INSERT INTO notes (${NOTE_COLUMNS.join(', ')}) VALUES (${NOTE_COLUMNS.map(() => '?').join(', ')})`).run(...values);
 
-  const chunk = db.prepare('INSERT INTO chunks (note_path, ordinal, heading_path, text) VALUES (?, ?, ?, ?)');
+  const chunk = db.prepare('INSERT INTO chunks (note_path, ordinal, heading_path, text, chunk_rev) VALUES (?, ?, ?, ?, ?)');
   const fts = db.prepare('INSERT INTO chunks_fts (rowid, text) VALUES (?, ?)');
   for (const c of n.chunks) {
-    const info = chunk.run(p.relPath, c.ordinal, canonicalJson(c.headingPath), c.text);
+    const info = chunk.run(p.relPath, c.ordinal, canonicalJson(c.headingPath), c.text, revOf(c.text));
     fts.run(info.lastInsertRowid, c.text);
   }
   const link = db.prepare(
@@ -236,18 +248,22 @@ export function updateIndex(h: IndexHandle, mode: IndexMode): RefreshResult {
   let updated = 0;
   let removed = 0;
   db.transaction(() => {
+    const before = full ? undefined : snapshotIds(db);
     if (full) {
       for (const t of ['chunks_fts', 'chunks', 'links', 'tags', 'aliases', 'headings', 'problems', 'notes']) db.exec(`DELETE FROM ${t}`);
+      clearIdentityHistory(db);
     }
-    const current = db.prepare('SELECT hash FROM notes WHERE path = ?');
+    const current = db.prepare('SELECT hash, prov_id FROM notes WHERE path = ?');
     const statOnly = db.prepare('UPDATE notes SET size = ?, mtime_ns = ?, ino = ?, ctime_ns = ?, racy = ? WHERE path = ?');
     let contentChanged = full;
+    // New paths wait until disappeared rows are gone, so renames can be matched.
+    const appeared: Prepared[] = [];
     for (const { abs, prepared } of changes) {
       let p = prepared;
       // The file may have changed again since it was read: re-read it now, under the write lock.
       const st = statBigSafe(abs);
       if (st === undefined || !st.isFile()) continue; // gone; removed below unless another run re-adds it
-      const existing = current.get(p.relPath) as { hash: string } | undefined;
+      const existing = current.get(p.relPath) as { hash: string; prov_id: string } | undefined;
       if (!sameStatKey(statKeyOf(st), p.stat) || (!p.parsed && existing?.hash !== p.hash)) {
         const again = prepareFile(h, abs, p.relPath, existing?.hash);
         if (!again.ok) continue;
@@ -259,21 +275,36 @@ export function updateIndex(h: IndexHandle, mode: IndexMode): RefreshResult {
       }
       if (!p.parsed) continue;
       if (existing) {
+        // Edited in place: same identity, new revision.
         deleteNote(db, p.relPath);
+        insertNote(db, p, existing.prov_id);
         updated++;
-      } else added++;
-      insertNote(db, p);
-      contentChanged = true;
+        contentChanged = true;
+      } else appeared.push(p);
     }
+    const gone: GoneNote[] = [];
     if (!full) {
+      const goneRow = db.prepare('SELECT hash, prov_id FROM notes WHERE path = ?');
       for (const path of known.keys()) {
         if (present.has(path)) continue;
+        const row = goneRow.get(path) as { hash: string; prov_id: string } | undefined;
+        if (row === undefined) continue; // already removed by a concurrent run
+        gone.push({ path, hash: row.hash, provId: row.prov_id });
         deleteNote(db, path);
         removed++;
         contentChanged = true;
       }
     }
-    if (contentChanged) resolveAllLinks(db);
+    const provIds = assignNewIdentities(db, appeared, gone);
+    for (const p of appeared) {
+      insertNote(db, p, provIds.get(p.relPath)!);
+      added++;
+      contentChanged = true;
+    }
+    if (contentChanged) {
+      resolveAllLinks(db);
+      finishIdentities(db, before, new Date().toISOString());
+    }
     if (full) setMeta(db, 'settings', settingsKey(h));
   }).immediate();
 
@@ -301,6 +332,10 @@ export interface IndexTotals {
   unknownStatuses: number;
   invalidFields: number;
   invalidUtf8: number;
+  provisionalIds: number;
+  duplicateIds: number;
+  missingIds: number;
+  cites: number;
   collisions: string[][];
 }
 
@@ -318,6 +353,10 @@ export function indexTotals(db: Db): IndexTotals {
     unknownStatuses: problems('unknown_status'),
     invalidFields: problems('invalid_field'),
     invalidUtf8: problems('invalid_utf8'),
+    provisionalIds: count('SELECT COUNT(*) AS n FROM notes WHERE provisional = 1'),
+    duplicateIds: duplicateIds(db).length,
+    missingIds: count('SELECT COUNT(*) AS n FROM missing_ids'),
+    cites: count('SELECT COUNT(*) AS n FROM cites'),
     collisions: findCollisions((db.prepare('SELECT path FROM notes').all() as { path: string }[]).map((r) => r.path)),
   }))();
 }

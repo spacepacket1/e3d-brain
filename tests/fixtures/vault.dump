@@ -1,33 +1,38 @@
-e3d-brain index dump v1
+e3d-brain index dump v2
 note "Bad Frontmatter.md"
   hash 265496d4d8fc753dccd160df93804d1a0fe68d469fc87a7b2a8a3a507c8d0d49 size 99
+  rev 265496d4d8fc753d id provisional
   title "Broken Frontmatter"
   folder curated
   frontmatter malformed
   heading h1 L5 "Broken Frontmatter"
   problem malformed_frontmatter - "Flow sequence in block collection must be sufficiently indented and end with a ]"
-  chunk 0 ["Broken Frontmatter"] "# Broken Frontmatter\n\nThe body is still searchable: zebrafinch."
+  chunk 0 0250dbbcc5b2a00f ["Broken Frontmatter"] "# Broken Frontmatter\n\nThe body is still searchable: zebrafinch."
 note "CRLF Note.md"
   hash b5c48a724e538d31dd3c6b1148cd99a12531e88b398a3be5b9d6da591779b315 size 76
+  rev 01905e24ea65ccce id provisional
   title "CRLF Title"
   folder curated
   frontmatter ok
   heading h1 L4 "CRLF"
-  chunk 0 ["CRLF"] "# CRLF\n\nWindows line endings with a BOM."
+  chunk 0 74ce02f8a97f13eb ["CRLF"] "# CRLF\n\nWindows line endings with a BOM."
 note "Café Ünïcode.md"
   hash 2d73c6dabebc3cb6faa84d4420a644ed866a9a3a1a624b8b2650fa00c3f1b564 size 80
+  rev 2d73c6dabebc3cb6 id provisional
   title "Café Ünïcode"
   folder curated
   frontmatter none
   heading h1 L1 "Café Ünïcode"
-  chunk 0 ["Café Ünïcode"] "# Café Ünïcode\n\nAn NFC-named note with accents. Mot unique: crème brûlée."
+  chunk 0 0d4e12de51986eca ["Café Ünïcode"] "# Café Ünïcode\n\nAn NFC-named note with accents. Mot unique: crème brûlée."
 note "Empty.md"
   hash e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 size 0
+  rev e3b0c44298fc1c14 id provisional
   title "Empty"
   folder curated
   frontmatter none
 note "Home.md"
   hash 2dd7920f297c677a70f63209f9650ee7de5692c4aae573c10bd4896076d5f269 size 588
+  rev 2dd7920f297c677a id provisional
   title "Home Base"
   folder curated
   frontmatter ok
@@ -38,8 +43,8 @@ note "Home.md"
   tag "start" frontmatter
   heading h1 L7 "Welcome"
   heading h2 L16 "Local"
-  chunk 0 ["Welcome"] "# Welcome\n\nLinks: [[Projects/Alpha]], [[alpha]] by basename, [[The Alpha Project]] by alias,\n[[Missing Note]] is unresolved, [[Beta#Design|beta design]] has an anchor and alias,\n![[Embedded Note]] is an embed, and [[#Local]] points here.\n\nInline code `[[not a link]]` and `#not-a-tag` is ignored; see https://example.com/page#fragment too.\nThis line has an #inline-tag and #nested/tag/ plus #2026 (numeric, not a tag)."
-  chunk 1 ["Welcome","Local"] "## Local\n\nSelf section with a link to [[Projects/Sub/Deep/Beta.md]] by exact path with extension."
+  chunk 0 60ebb43de383c514 ["Welcome"] "# Welcome\n\nLinks: [[Projects/Alpha]], [[alpha]] by basename, [[The Alpha Project]] by alias,\n[[Missing Note]] is unresolved, [[Beta#Design|beta design]] has an anchor and alias,\n![[Embedded Note]] is an embed, and [[#Local]] points here.\n\nInline code `[[not a link]]` and `#not-a-tag` is ignored; see https://example.com/page#fragment too.\nThis line has an #inline-tag and #nested/tag/ plus #2026 (numeric, not a tag)."
+  chunk 1 74e3f27618fd5153 ["Welcome","Local"] "## Local\n\nSelf section with a link to [[Projects/Sub/Deep/Beta.md]] by exact path with extension."
   link 0 L9 "Projects/Alpha" -> path "Projects/Alpha.md"
   link 1 L9 "alpha" -> basename "Projects/Alpha.md"
   link 2 L9 "The Alpha Project" -> alias "Projects/Alpha.md"
@@ -50,6 +55,7 @@ note "Home.md"
   link 7 L18 "Projects/Sub/Deep/Beta.md" -> path "Projects/Sub/Deep/Beta.md"
 note "Invalid Fields.md"
   hash 0c4702529eb9946d649226124cbe14dd1166aab483186d1264dca805e0829916 size 169
+  rev 0c4702529eb9946d id provisional
   title "Invalid Fields"
   folder curated
   frontmatter ok unknown-status
@@ -61,15 +67,17 @@ note "Invalid Fields.md"
   problem invalid_field origin "unknown origin \"email\""
   problem invalid_date occurred "\"2026-02-30\""
   problem invalid_date expires "\"tomorrow\""
-  chunk 0 [] "Body without a heading. Unique word: axolotl."
+  chunk 0 8c8e043172ca435b [] "Body without a heading. Unique word: axolotl."
 note "Only Frontmatter.md"
   hash 008c8059f1f7cb55ae7d3236a44356762a3b8222f423b1a167482904ec071cf5 size 19
+  rev 008c8059f1f7cb55 id provisional
   title "Only Frontmatter"
   folder curated
   frontmatter ok
   fields kind="todo"
 note "Projects/Alpha.md"
   hash 16ce9e8c845e5bf8bcf987325fcd9d1847c6829be6f584f3800498cf2e3ead9b size 6029
+  rev 16ce9e8c845e5bf8 id "01JALPHA0000000000000000AA"
   title "Alpha Project"
   folder curated
   frontmatter ok
@@ -82,115 +90,128 @@ note "Projects/Alpha.md"
   heading h2 L29 "Background"
   heading h2 L33 "Code"
   heading h3 L70 "Nested Detail"
-  chunk 0 ["Alpha"] "# Alpha\n\nAlpha is the first project. #project"
-  chunk 1 ["Alpha","Background"] "## Background\n\nSentence number 1 explains a detail of the alpha decision in plain words so that the paragraph grows long. Sentence number 2 explains a detail of the alpha decision in plain words so that the paragraph grows long. Sentence number 3 explains a detail of the alpha decision in plain words so that the paragraph grows long. Sentence number 4 explains a detail of the alpha decision in plain words so that the paragraph grows long. Sentence number 5 explains a detail of the alpha decision in plain words so that the paragraph grows long. Sentence number 6 explains a detail of the alpha decision in plain words so that the paragraph grows long. Sentence number 7 explains a detail of the alpha decision in plain words so that the paragraph grows long. Sentence number 8 explains a detail of the alpha decision in plain words so that the paragraph grows long. Sentence number 9 explains a detail of the alpha decision in plain words so that the paragraph grows long. Sentence number 10 explains a detail of the alpha decision in plain words so that the paragraph grows long. Sentence number 11 explains a detail of the alpha decision in plain words so that the paragraph grows long. Sentence number 12 explains a detail of the alpha decision in plain words so that the paragraph grows long. Sentence number 13 explains a detail of the alpha decision in plain words so that the paragraph grows long."
-  chunk 2 ["Alpha","Background"] "Sentence number 14 explains a detail of the alpha decision in plain words so that the paragraph grows long. Sentence number 15 explains a detail of the alpha decision in plain words so that the paragraph grows long. Sentence number 16 explains a detail of the alpha decision in plain words so that the paragraph grows long. Sentence number 17 explains a detail of the alpha decision in plain words so that the paragraph grows long. Sentence number 18 explains a detail of the alpha decision in plain words so that the paragraph grows long. Sentence number 19 explains a detail of the alpha decision in plain words so that the paragraph grows long. Sentence number 20 explains a detail of the alpha decision in plain words so that the paragraph grows long. Sentence number 21 explains a detail of the alpha decision in plain words so that the paragraph grows long. Sentence number 22 explains a detail of the alpha decision in plain words so that the paragraph grows long. Sentence number 23 explains a detail of the alpha decision in plain words so that the paragraph grows long. Sentence number 24 explains a detail of the alpha decision in plain words so that the paragraph grows long. Sentence number 25 explains a detail of the alpha decision in plain words so that the paragraph grows long. Sentence number 26 explains a detail of the alpha decision in plain words so that the paragraph grows long."
-  chunk 3 ["Alpha","Background"] "Sentence number 27 explains a detail of the alpha decision in plain words so that the paragraph grows long. Sentence number 28 explains a detail of the alpha decision in plain words so that the paragraph grows long. Sentence number 29 explains a detail of the alpha decision in plain words so that the paragraph grows long. Sentence number 30 explains a detail of the alpha decision in plain words so that the paragraph grows long."
-  chunk 4 ["Alpha","Code"] "## Code"
-  chunk 5 ["Alpha","Code"] "```ts\n# not a heading inside a fence\n// [[not a link either]] and #notatag\nconst value01 = computeSomething(1); // keep this fenced block intact\nconst value02 = computeSomething(2); // keep this fenced block intact\nconst value03 = computeSomething(3); // keep this fenced block intact\nconst value04 = computeSomething(4); // keep this fenced block intact\nconst value05 = computeSomething(5); // keep this fenced block intact\nconst value06 = computeSomething(6); // keep this fenced block intact\nconst value07 = computeSomething(7); // keep this fenced block intact\nconst value08 = computeSomething(8); // keep this fenced block intact\nconst value09 = computeSomething(9); // keep this fenced block intact\nconst value10 = computeSomething(10); // keep this fenced block intact\nconst value11 = computeSomething(11); // keep this fenced block intact\nconst value12 = computeSomething(12); // keep this fenced block intact\nconst value13 = computeSomething(13); // keep this fenced block intact\nconst value14 = computeSomething(14); // keep this fenced block intact\nconst value15 = computeSomething(15); // keep this fenced block intact\nconst value16 = computeSomething(16); // keep this fenced block intact\nconst value17 = computeSomething(17); // keep this fenced block intact\nconst value18 = computeSomething(18); // keep this fenced block intact\nconst value19 = computeSomething(19); // keep this fenced block intact\nconst value20 = computeSomething(20); // keep this fenced block intact\nconst value21 = computeSomething(21); // keep this fenced block intact\nconst value22 = computeSomething(22); // keep this fenced block intact\nconst value23 = computeSomething(23); // keep this fenced block intact\nconst value24 = computeSomething(24); // keep this fenced block intact\nconst value25 = computeSomething(25); // keep this fenced block intact\nconst value26 = computeSomething(26); // keep this fenced block intact\nconst value27 = computeSomething(27); // keep this fenced block intact\nconst value28 = computeSomething(28); // keep this fenced block intact\nconst value29 = computeSomething(29); // keep this fenced block intact\nconst value30 = computeSomething(30); // keep this fenced block intact\n```"
-  chunk 6 ["Alpha","Code","Nested Detail"] "### Nested Detail\n\nShort nested text. Unique word: quetzalcoatl."
+  chunk 0 a5c0394678da8431 ["Alpha"] "# Alpha\n\nAlpha is the first project. #project"
+  chunk 1 f0ee7f6c96f64071 ["Alpha","Background"] "## Background\n\nSentence number 1 explains a detail of the alpha decision in plain words so that the paragraph grows long. Sentence number 2 explains a detail of the alpha decision in plain words so that the paragraph grows long. Sentence number 3 explains a detail of the alpha decision in plain words so that the paragraph grows long. Sentence number 4 explains a detail of the alpha decision in plain words so that the paragraph grows long. Sentence number 5 explains a detail of the alpha decision in plain words so that the paragraph grows long. Sentence number 6 explains a detail of the alpha decision in plain words so that the paragraph grows long. Sentence number 7 explains a detail of the alpha decision in plain words so that the paragraph grows long. Sentence number 8 explains a detail of the alpha decision in plain words so that the paragraph grows long. Sentence number 9 explains a detail of the alpha decision in plain words so that the paragraph grows long. Sentence number 10 explains a detail of the alpha decision in plain words so that the paragraph grows long. Sentence number 11 explains a detail of the alpha decision in plain words so that the paragraph grows long. Sentence number 12 explains a detail of the alpha decision in plain words so that the paragraph grows long. Sentence number 13 explains a detail of the alpha decision in plain words so that the paragraph grows long."
+  chunk 2 abc94d7cfdae5251 ["Alpha","Background"] "Sentence number 14 explains a detail of the alpha decision in plain words so that the paragraph grows long. Sentence number 15 explains a detail of the alpha decision in plain words so that the paragraph grows long. Sentence number 16 explains a detail of the alpha decision in plain words so that the paragraph grows long. Sentence number 17 explains a detail of the alpha decision in plain words so that the paragraph grows long. Sentence number 18 explains a detail of the alpha decision in plain words so that the paragraph grows long. Sentence number 19 explains a detail of the alpha decision in plain words so that the paragraph grows long. Sentence number 20 explains a detail of the alpha decision in plain words so that the paragraph grows long. Sentence number 21 explains a detail of the alpha decision in plain words so that the paragraph grows long. Sentence number 22 explains a detail of the alpha decision in plain words so that the paragraph grows long. Sentence number 23 explains a detail of the alpha decision in plain words so that the paragraph grows long. Sentence number 24 explains a detail of the alpha decision in plain words so that the paragraph grows long. Sentence number 25 explains a detail of the alpha decision in plain words so that the paragraph grows long. Sentence number 26 explains a detail of the alpha decision in plain words so that the paragraph grows long."
+  chunk 3 e763b33d2cc3f4c4 ["Alpha","Background"] "Sentence number 27 explains a detail of the alpha decision in plain words so that the paragraph grows long. Sentence number 28 explains a detail of the alpha decision in plain words so that the paragraph grows long. Sentence number 29 explains a detail of the alpha decision in plain words so that the paragraph grows long. Sentence number 30 explains a detail of the alpha decision in plain words so that the paragraph grows long."
+  chunk 4 e2478b56493dca9b ["Alpha","Code"] "## Code"
+  chunk 5 2760de8371117e72 ["Alpha","Code"] "```ts\n# not a heading inside a fence\n// [[not a link either]] and #notatag\nconst value01 = computeSomething(1); // keep this fenced block intact\nconst value02 = computeSomething(2); // keep this fenced block intact\nconst value03 = computeSomething(3); // keep this fenced block intact\nconst value04 = computeSomething(4); // keep this fenced block intact\nconst value05 = computeSomething(5); // keep this fenced block intact\nconst value06 = computeSomething(6); // keep this fenced block intact\nconst value07 = computeSomething(7); // keep this fenced block intact\nconst value08 = computeSomething(8); // keep this fenced block intact\nconst value09 = computeSomething(9); // keep this fenced block intact\nconst value10 = computeSomething(10); // keep this fenced block intact\nconst value11 = computeSomething(11); // keep this fenced block intact\nconst value12 = computeSomething(12); // keep this fenced block intact\nconst value13 = computeSomething(13); // keep this fenced block intact\nconst value14 = computeSomething(14); // keep this fenced block intact\nconst value15 = computeSomething(15); // keep this fenced block intact\nconst value16 = computeSomething(16); // keep this fenced block intact\nconst value17 = computeSomething(17); // keep this fenced block intact\nconst value18 = computeSomething(18); // keep this fenced block intact\nconst value19 = computeSomething(19); // keep this fenced block intact\nconst value20 = computeSomething(20); // keep this fenced block intact\nconst value21 = computeSomething(21); // keep this fenced block intact\nconst value22 = computeSomething(22); // keep this fenced block intact\nconst value23 = computeSomething(23); // keep this fenced block intact\nconst value24 = computeSomething(24); // keep this fenced block intact\nconst value25 = computeSomething(25); // keep this fenced block intact\nconst value26 = computeSomething(26); // keep this fenced block intact\nconst value27 = computeSomething(27); // keep this fenced block intact\nconst value28 = computeSomething(28); // keep this fenced block intact\nconst value29 = computeSomething(29); // keep this fenced block intact\nconst value30 = computeSomething(30); // keep this fenced block intact\n```"
+  chunk 6 fee4e013825de7dc ["Alpha","Code","Nested Detail"] "### Nested Detail\n\nShort nested text. Unique word: quetzalcoatl."
 note "Projects/Sub/Deep/Beta.md"
   hash 743108cbc440d6d8391006e028cce2d4e3927ee68d887c2eb4d398da953ec71e size 136
+  rev 743108cbc440d6d8 id provisional
   title "Beta"
   folder curated
   frontmatter none
   heading h1 L1 "Beta"
   heading h2 L5 "Design"
-  chunk 0 ["Beta"] "# Beta\n\nBeta lives deep in nested folders."
-  chunk 1 ["Beta","Design"] "## Design\n\nThe design links back to [[Home]] and to [[projects/ALPHA]] with different case."
+  chunk 0 811a44174e0894ff ["Beta"] "# Beta\n\nBeta lives deep in nested folders."
+  chunk 1 719d2adf0c96c7fe ["Beta","Design"] "## Design\n\nThe design links back to [[Home]] and to [[projects/ALPHA]] with different case."
   link 0 L7 "Home" -> path "Home.md"
   link 1 L7 "projects/ALPHA" -> basename "Projects/Alpha.md"
 note "Résumé.md"
   raw "Re\u0301sume\u0301.md"
   hash 8d93d322d74deaa30d6bca511ad7ed85e235c75a19cb6a73d1e191a47eeab072 size 31
+  rev 8d93d322d74deaa3 id provisional
   title "Résumé"
   folder curated
   frontmatter none
   heading h1 L1 "Résumé"
-  chunk 0 ["Résumé"] "# Résumé\n\nAn NFD-named note."
+  chunk 0 0a1d9ce6e174f7ee ["Résumé"] "# Résumé\n\nAn NFD-named note."
 note "Stale Note.md"
   hash e12f9771e9829eec2e3aaff1c3a9547fbed172e5f0eff4d2ecbcc4fdb44d4398 size 39
+  rev e12f9771e9829eec id provisional
   title "Stale Note"
   folder curated
   frontmatter ok
   fields status="stale"
-  chunk 0 [] "Old information."
+  chunk 0 31c50a44493093ed [] "Old information."
 note "Unclosed Frontmatter.md"
   hash df1ec8ce6bb454af0bfaed2773f91743f8714feb0d369a95d8998d14e7ebe5e1 size 68
+  rev df1ec8ce6bb454af id provisional
   title "Heading After Unclosed"
   folder curated
   frontmatter malformed
   heading h1 L3 "Heading After Unclosed"
   problem malformed_frontmatter - "frontmatter block is not closed"
-  chunk 0 [] "---\ntitle: never closed"
-  chunk 1 ["Heading After Unclosed"] "# Heading After Unclosed\n\nBody word: okapi."
+  chunk 0 cb8bf40bbc45160d [] "---\ntitle: never closed"
+  chunk 1 0c241301431ecf0e ["Heading After Unclosed"] "# Heading After Unclosed\n\nBody word: okapi."
 note "Unicode Links.md"
   hash d448cf348567fc6983399769b151c88900263227916959cd14cdbde261ce1f38 size 126
+  rev d448cf348567fc69 id provisional
   title "Unicode Links"
   folder curated
   frontmatter none
-  chunk 0 [] "Links in NFD text: [[café ünïcode]] and [[データ]] and alias [[ΑΛΦΑ]].\nRésumé NFD-named note: [[Résumé]]."
+  chunk 0 ce076c0358dab09b [] "Links in NFD text: [[café ünïcode]] and [[データ]] and alias [[ΑΛΦΑ]].\nRésumé NFD-named note: [[Résumé]]."
   link 0 L1 "café ünïcode" -> basename "Café Ünïcode.md"
   link 1 L1 "データ" -> path "データ.md"
   link 2 L1 "ΑΛΦΑ" -> alias "Projects/Alpha.md"
   link 3 L2 "Résumé" -> path "Résumé.md"
 note "_archive/retired.md"
   hash 1f8f4fc2901cce8f4b9ccf8407a126a385f2229b30180a9afd8af6e8c0a17ff7 size 204
+  rev 1f8f4fc2901cce8f id provisional
   title "retired"
   folder archive hidden
   frontmatter ok
   fields status="superseded" superseded_at="2026-05-05" archived_at="2026-05-06" superseded_by="01JALPHA0000000000000000AA" supersedes=["01JOLD","01JOLDER"] merged_into="01JALPHA0000000000000000AA"
-  chunk 0 [] "Retired note."
+  chunk 0 b4e122a46330e260 [] "Retired note."
 note "_inbox/_rejected/old-proposal.md"
   hash 105535c6a063b3492932c050b74411add4f12a02a4c6eaee917843ba6281dddd size 44
+  rev 105535c6a063b349 id provisional
   title "old-proposal"
   folder inbox hidden
   frontmatter ok
   fields status="rejected"
-  chunk 0 [] "Rejected proposal."
+  chunk 0 9ecb3959d140fb8b [] "Rejected proposal."
 note "_inbox/proposal.md"
   hash 673dd896235b67a00762c36a5d0d8f504e3101d69125adeda191cb84c83fc323 size 207
+  rev 673dd896235b67a0 id provisional
   title "Proposal"
   folder inbox
   frontmatter ok
   fields status="proposed" kind="idea" created="2026-10-01T10:00:00Z" author="chris" origin="mcp" sources=["url:https://example.com/post"] untrusted_origin=true
   heading h1 L10 "Proposal"
-  chunk 0 ["Proposal"] "# Proposal\n\nA proposed idea that links to [[Home]]."
+  chunk 0 b901ab84375662e2 ["Proposal"] "# Proposal\n\nA proposed idea that links to [[Home]]."
   link 0 L12 "Home" -> path "Home.md"
 note "_raw/conversation.md"
   hash 60bcbafead97189f84029fb30f387080aafd88e86cd52241f7897018f093557b size 80
+  rev 60bcbafead97189f id provisional
   title "conversation"
   folder raw
   frontmatter ok
   fields kind="raw" occurred="2026-09-30" origin="import"
-  chunk 0 [] "User: hello\nAssistant: hi"
+  chunk 0 04a1231e6c9b80ba [] "User: hello\nAssistant: hi"
 note "journal/_archive/agent-1/2026-01-01-old.md"
   hash 0b5ebc722ffc91306784480d8f92a6c499d86a18e37175e545dac115248f497e size 76
+  rev 0b5ebc722ffc9130 id provisional
   title "2026-01-01-old"
   folder archive hidden
   frontmatter ok
   fields status="archived" archived_at="2026-06-01"
-  chunk 0 [] "An archived journal entry."
+  chunk 0 d3b1c1e7a39711be [] "An archived journal entry."
 note "journal/agent-1/2026-10-14-lesson.md"
   hash 3a2b241975d899d40792f9f06f404397d58ef45ba670bc1456b4e27e5a23239c size 150
+  rev 3a2b241975d899d4 id provisional
   title "2026-10-14-lesson"
   folder journal
   frontmatter ok
   fields status="journal" kind="lesson" expires="2026-12-31" author="agent-1" origin="mcp" sources=["commit:deadbeef"]
-  chunk 0 [] "Lesson learned: verify before acting."
+  chunk 0 42c494b5ec7ceeff [] "Lesson learned: verify before acting."
 note "references/Book Notes.md"
   hash 1308c3305898716200792a8f889297c3d9f01a0cc0da16a97e6a29a7e7005ed0 size 98
+  rev 1308c33058987162 id provisional
   title "Book Notes"
   folder reference
   frontmatter ok
   fields kind="reference"
   tag "reading" frontmatter
   heading h1 L5 "Book Notes"
-  chunk 0 ["Book Notes"] "# Book Notes\n\nNotes on a book with a stale status elsewhere."
+  chunk 0 65a0ffd800bfea54 ["Book Notes"] "# Book Notes\n\nNotes on a book with a stale status elsewhere."
 note "データ.md"
   hash fb390d2fbb66e991393d3e80c24af9b66cfc9ab3312b27584738dfc398c0ef12 size 34
+  rev fb390d2fbb66e991 id provisional
   title "データ"
   folder curated
   frontmatter none
   heading h1 L1 "データ"
-  chunk 0 ["データ"] "# データ\n\nKatakana title note."
+  chunk 0 a9274e334ef086c2 ["データ"] "# データ\n\nKatakana title note."

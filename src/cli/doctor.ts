@@ -1,8 +1,12 @@
 // `ebrain doctor`: environment and configuration report. Read-only with
 // respect to the vault; it creates the state dir (0700) if missing and writes
-// one short-lived probe file there to test case sensitivity.
+// one short-lived probe file there to test case sensitivity. If the index
+// exists it is refreshed and checked for duplicate ids, missing identities,
+// and frontmatter problems; doctor never creates the index.
 
 import { randomBytes } from 'node:crypto';
+import { duplicateIds, missingIdentities } from '../index/identity.js';
+import { closeIndex, indexExists, indexTotals, openIndex, refreshIndex } from '../index/indexer.js';
 import { checkFts5 } from '../index/sqlite.js';
 import { findCollisions } from '../vault/names.js';
 import { scanVault } from '../vault/scan.js';
@@ -112,6 +116,63 @@ function checkStateDir(config: Config, lines: string[], vaultDev: number | undef
   return ok;
 }
 
+/** Show at most this many entries per list. */
+const MAX_LISTED = 20;
+
+function listSome<T>(items: T[], lines: string[], fmt: (item: T) => string): void {
+  for (const item of items.slice(0, MAX_LISTED)) lines.push(`  ${fmt(item)}`);
+  if (items.length > MAX_LISTED) lines.push(`  ... and ${items.length - MAX_LISTED} more`);
+}
+
+/**
+ * Index checks (I12, I10): duplicate explicit ids are an error (both notes are
+ * indexed; the later one in path order gets a provisional id); missing
+ * identities, unknown statuses, malformed frontmatter, and invalid dates are
+ * warnings with counts.
+ */
+function checkIndex(config: Config, lines: string[]): boolean {
+  let stateDir: SafePath;
+  try {
+    stateDir = ensureStateDir(config);
+    if (!indexExists(stateDir)) {
+      lines.push('index: not built (run `ebrain reindex` to check ids, citations, and frontmatter)');
+      return true;
+    }
+  } catch (err) {
+    lines.push(`index: FAIL ${message(err)}`);
+    return false;
+  }
+  let h: ReturnType<typeof openIndex> | undefined;
+  try {
+    h = openIndex({ vaultPath: config.vaultPath, stateDir, mustExist: true });
+    refreshIndex(h);
+    const t = indexTotals(h.db);
+    const dups = duplicateIds(h.db);
+    const missing = missingIdentities(h.db);
+    lines.push(`index: ${t.notes} notes (refreshed)`);
+    const warn = (n: number) => (n === 0 ? '0' : `WARN ${n}`);
+    let ok = true;
+    if (dups.length === 0) lines.push('duplicate ids: none');
+    else {
+      lines.push(`duplicate ids: FAIL ${dups.length} (the later note in path order gets a provisional id)`);
+      listSome(dups, lines, (d) => `duplicate id ${JSON.stringify(d.id)}: ${d.paths.map((p) => JSON.stringify(p)).join(' ')}`);
+      ok = false;
+    }
+    lines.push(`missing identities: ${warn(missing.length)}`);
+    listSome(missing, lines, (m) =>
+      `missing ${m.provisional ? 'provisional ' : ''}id ${m.id} (last at ${JSON.stringify(m.lastPath)} rev ${m.lastRev}, since ${m.since})`);
+    lines.push(`unknown statuses: ${warn(t.unknownStatuses)}`);
+    lines.push(`malformed frontmatter: ${warn(t.malformedFrontmatter)}`);
+    lines.push(`invalid dates: ${warn(t.invalidDates)}`);
+    return ok;
+  } catch (err) {
+    lines.push(`index: FAIL ${message(err)}`);
+    return false;
+  } finally {
+    if (h) closeIndex(h);
+  }
+}
+
 export function runDoctor(opts: EnvOptions = {}): DoctorReport {
   const lines: string[] = [];
   let ok = true;
@@ -147,6 +208,7 @@ export function runDoctor(opts: EnvOptions = {}): DoctorReport {
   const vault = checkVault(config, lines);
   ok &&= vault.ok;
   ok &&= checkStateDir(config, lines, vault.dev);
+  if (vault.ok) ok = checkIndex(config, lines) && ok;
 
   const hosts = config.network.allowedHosts;
   lines.push(hosts.length === 0 ? 'network: disabled' : `network: allowed hosts ${hosts.join(', ')}`);

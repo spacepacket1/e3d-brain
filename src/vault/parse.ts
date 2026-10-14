@@ -6,7 +6,9 @@
 // typed fields are recorded as problems. Unknown frontmatter keys are kept as
 // an opaque JSON blob, never dropped.
 
+import { createHash } from 'node:crypto';
 import { parseDocument } from 'yaml';
+import { isNoteId, parseCitation } from '../cite/citation.js';
 import { chunkBody, DEFAULT_MAX_CHUNK_CHARS, type Chunk } from './chunk.js';
 import { extractInlineTags, extractWikiLinks, maskInlineCode, scanLines, type WikiLink } from './markdown.js';
 import { compareBytes, nfc, noteBasename } from './names.js';
@@ -57,6 +59,8 @@ export interface Problem {
 }
 
 export interface ParsedNote {
+  /** Note revision: see `revOf`. */
+  rev: string;
   title: string;
   frontmatter: 'none' | 'ok' | 'malformed';
   fields: NoteFields;
@@ -84,6 +88,24 @@ export function decodeNote(data: Uint8Array): { text: string; invalidUtf8: boole
   }
   if (text.startsWith('\uFEFF')) text = text.slice(1);
   return { text: text.replace(/\r\n?/g, '\n'), invalidUtf8 };
+}
+
+/** Provisional ids are minted by the index; an explicit `id` may not claim the prefix. */
+export const PROVISIONAL_PREFIX = 'prov_';
+
+/** The frontmatter `id` if it is usable as a note id, else `null` (the note gets a provisional id). */
+export function explicitId(id: string | null): string | null {
+  return id !== null && isNoteId(id) && !id.startsWith(PROVISIONAL_PREFIX) ? id : null;
+}
+
+/**
+ * Revision of normalized text: the first 16 hex characters of the SHA-256 of
+ * its UTF-8 encoding. `rev` is this over the whole decoded note (frontmatter
+ * plus body) and `chunk_rev` over a chunk's text; `decodeNote` is the whole
+ * normalization (UTF-8, leading BOM stripped, CRLF and CR to LF).
+ */
+export function revOf(text: string): string {
+  return createHash('sha256').update(text, 'utf8').digest('hex').slice(0, 16);
 }
 
 /** Split off a leading `---` frontmatter block closed by `---` or `...`. */
@@ -173,12 +195,21 @@ function interpretFields(fm: Record<string, unknown>, problems: Problem[]): { fi
     else invalid('schema', 'expected a positive integer');
   }
   str('id');
+  if (fields.id !== null && explicitId(fields.id) === null) {
+    invalid('id', `expected [A-Za-z0-9_]+ not starting with ${PROVISIONAL_PREFIX}; a provisional id is used`);
+  }
   str('author');
   str('superseded_by');
   str('merged_into');
   list('sources');
   list('supersedes');
   list('derived_from');
+  for (const k of ['sources', 'derived_from'] as const) {
+    for (const entry of fields[k]) {
+      const c = parseCitation(entry);
+      if (!c.ok) invalid(k, `not a citation (${c.error}): ${JSON.stringify(entry.slice(0, 100))}`);
+    }
+  }
   bool('pinned');
   bool('untrusted_origin');
 
@@ -306,6 +337,7 @@ export function parseNote(relPath: string, data: Uint8Array, opts: ParseOptions 
   title ??= noteBasename(relPath);
 
   return {
+    rev: revOf(text),
     title: nfc(title),
     frontmatter,
     fields,

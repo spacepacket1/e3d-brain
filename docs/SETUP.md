@@ -97,6 +97,19 @@ counted in the `reindex` summary; the note body is still indexed. Paths that
 differ only by case or Unicode normalization (one file on macOS, two on Linux)
 are both indexed and reported by `ebrain doctor` as collisions.
 
+Note identity: a note's `id` comes from its frontmatter; without one the index
+derives a provisional id (`prov_…`) from the content hash and path. A
+provisional id follows a rename or move only when the content is unchanged
+and no other note has the same content; editing and moving in one step gives
+a new id and reports the old one as missing. Provisional ids are not durable
+across `reindex --full`, so give long-lived notes an explicit `id`. Each note
+also has a `rev` (16 hex characters of a SHA-256 over the whole file, with
+line endings and a leading BOM normalized). `ebrain doctor` refreshes an
+existing index and reports duplicate explicit ids (an error: the later note in
+path order gets a provisional id), missing identities, unknown statuses,
+malformed frontmatter, and invalid dates. The index never writes ids into
+notes.
+
 **The state directory must be on a local filesystem**, not NFS, EFS, SMB, or
 another network filesystem: several processes (the CLI and any number of MCP
 servers) share `index.db` through SQLite WAL mode, which needs working shared

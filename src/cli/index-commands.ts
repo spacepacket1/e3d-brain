@@ -37,7 +37,8 @@ export function formatSummary(r: RefreshResult, t: ReturnType<typeof indexTotals
   const lines = [
     `reindex (${r.mode}${r.rebuilt ? ', rebuilt for new parser settings' : ''}): ${t.notes} notes; ` +
       `added ${r.added}, updated ${r.updated}, removed ${r.removed}, unchanged ${r.unchanged}`,
-    `chunks: ${t.chunks}  links: ${t.links} (unresolved ${t.unresolvedLinks})  tags: ${t.tags}`,
+    `chunks: ${t.chunks}  links: ${t.links} (unresolved ${t.unresolvedLinks})  tags: ${t.tags}  note citations: ${t.cites}`,
+    `ids: provisional ${t.provisionalIds}, duplicate ${t.duplicateIds}, missing ${t.missingIds}`,
     `malformed frontmatter: ${t.malformedFrontmatter}`,
     `invalid dates: ${t.invalidDates}`,
     `unknown statuses: ${t.unknownStatuses}`,
