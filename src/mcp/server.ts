@@ -16,6 +16,7 @@ import { attachToServer, listTools, ToolRegistry, type DispatchContext } from '.
 import { registerInboxTools } from './inbox-tools.js';
 import { registerJournalTools } from './journal-tools.js';
 import { registerRefTools } from './ref-tools.js';
+import { createEmbedder } from '../net/ollama.js';
 import { registerReadTools, type RefsEnv } from './tools.js';
 
 export const SERVER_NAME = 'e3d-brain';
@@ -49,7 +50,9 @@ export async function runMcpServer(opts: McpServerOptions): Promise<void> {
   const registry = new ToolRegistry();
   // The reference library (Phase 11): refs.db is opened read-only per call, so books added later are found.
   const refs: RefsEnv = { stateDir, excerptChars: config.refs.excerptChars, maxHits: config.refs.maxHits };
-  registerReadTools({ vaultPath: config.vaultPath, index, mode: config.mode, refs }, registry);
+  // Optional embeddings (Phase 12): none by default, so no network code runs.
+  const embedder = createEmbedder(config.embeddings, config.network.allowedHosts);
+  registerReadTools({ vaultPath: config.vaultPath, index, mode: config.mode, refs, embedder, extraPatterns: config.scrub.extraPatterns }, registry);
   registerRefTools(refs, registry);
   // capture and list_inbox exist in inbox mode only (Phase 8, I2).
   if (config.mode === 'inbox') registerInboxTools({ vaultPath: config.vaultPath, index, extraPatterns: config.scrub.extraPatterns }, registry);

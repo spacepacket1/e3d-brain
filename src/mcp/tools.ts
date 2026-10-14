@@ -16,9 +16,11 @@
 import { formatCitation, type NoteCitation } from '../cite/citation.js';
 import { refreshIndex, MAX_NOTE_BYTES, type IndexHandle } from '../index/indexer.js';
 import {
-  allNoteRows, firstChunkText, ftsQuery, neighbours, noteRowByPath, searchChunks, tagsByPath, type NoteRow,
+  allNoteRows, chunkHitsByKeys, firstChunkText, ftsQuery, neighbours, noteRowByPath, searchChunks, tagsByPath, type NoteRow,
 } from '../index/query.js';
-import { effectiveTier, HIDDEN_STATUSES, rank, type RankItem, type TierOrHidden } from '../index/rank.js';
+import { chunkKey, effectiveTier, fuseRrf, HIDDEN_STATUSES, nearestChunks, rank, type RankItem, type TierOrHidden } from '../index/rank.js';
+import { normalize, scoreVectors, scrubbedForEmbedding } from '../index/vectors.js';
+import type { Embedder } from '../net/ollama.js';
 import { nfc, type FolderClass } from '../vault/names.js';
 import { decodeNote, isIsoDate, revOf, STATUSES } from '../vault/parse.js';
 import { readFileWithStatSafe, resolveInVault, SafePathError, type SafePath } from '../safe-path.js';
@@ -62,6 +64,9 @@ export interface ReadToolEnv {
   now?: () => Date;
   /** The reference library (Phase 11); without it `scope: refs` finds nothing. */
   refs?: RefsEnv;
+  /** Optional embeddings (Phase 12): when set, `search` fuses vector similarity with BM25. Absent: BM25 only. */
+  embedder?: Embedder;
+  extraPatterns?: readonly string[];
 }
 
 // ---- schemas ----
@@ -557,7 +562,7 @@ function refItem(h: RefHit, tier: TierOrHidden, format: Format, excerptChars: nu
   return { fields, excerpt, returned: { id: h.ref_id, rev: h.chunk_rev } };
 }
 
-function search(env: ReadToolEnv, args: Record<string, unknown>, maxChars: number): ToolResult {
+async function search(env: ReadToolEnv, args: Record<string, unknown>, maxChars: number): Promise<ToolResult> {
   const format = formatArg(args);
   const scope = (typeof args['scope'] === 'string' ? args['scope'] : 'notes') as SearchScope;
   const vis = visibilityArgs(args, env);
@@ -579,11 +584,35 @@ function search(env: ReadToolEnv, args: Record<string, unknown>, maxChars: numbe
     }
   }
   const tagMap = tags.length > 0 ? tagsByPath(db) : undefined;
-  const notes = hits
-    .filter((h) => scope !== 'raw' || h.folder_class === 'raw')
-    .filter((h) => inFolder(h.path, folder) && isVisible(h, vis))
-    .filter((h) => tagMap === undefined || tags.every((t) => (tagMap.get(h.path) ?? []).includes(t)))
-    .map((h) => rankItem({ row: h as NoteRow, hit: h, ordinal: h.ordinal, bm25: h.bm25 }));
+  const wanted = (h: (typeof hits)[number]) =>
+    (scope !== 'raw' || h.folder_class === 'raw') &&
+    inFolder(h.path, folder) &&
+    isVisible(h, vis) &&
+    (tagMap === undefined || tags.every((t) => (tagMap.get(h.path) ?? []).includes(t)));
+  let candidates = hits.filter(wanted);
+  let fused: Map<string, number> | undefined;
+  let embeddings: string | undefined;
+  if (env.embedder !== undefined && !advanced && match !== undefined && scope !== 'refs') {
+    // Hybrid (Phase 12): the query is scrubbed before it leaves the process (I5); any failure degrades to BM25.
+    try {
+      const [raw] = await env.embedder.embed([scrubbedForEmbedding(query, env.extraPatterns)]);
+      const q = raw === undefined ? undefined : normalize(raw);
+      if (q === undefined) throw new Error('unusable query vector');
+      const near = nearestChunks(scoreVectors(db, env.embedder.model, q));
+      const known = new Set(hits.map((h) => chunkKey({ path: h.path, ordinal: h.ordinal })));
+      const extra = chunkHitsByKeys(db, near.filter((n) => !known.has(chunkKey(n)))).filter(wanted);
+      candidates = [...candidates, ...extra];
+      const kept = new Set(candidates.map((h) => chunkKey({ path: h.path, ordinal: h.ordinal })));
+      const vectors = near.filter((n) => kept.has(chunkKey(n)));
+      const bm25 = candidates.filter((h) => known.has(chunkKey({ path: h.path, ordinal: h.ordinal })));
+      fused = fuseRrf(bm25.map((h) => ({ path: h.path, ordinal: h.ordinal, bm25: h.bm25 })), vectors);
+      embeddings = 'hybrid';
+    } catch {
+      embeddings = 'unavailable';
+    }
+  }
+  const notes = candidates
+    .map((h) => rankItem({ row: h as NoteRow, hit: h, ordinal: h.ordinal, bm25: h.bm25, ...(fused === undefined ? {} : { fused: fused.get(chunkKey({ path: h.path, ordinal: h.ordinal })) ?? 0 }) }));
   const refs = match !== undefined && (scope === 'refs' || scope === 'all') ? refCandidates(env, match, advanced) : [];
   // Notes first, then books (rank.ts); at most `limit` notes and min(limit, refs.maxHits) book passages.
   const ranked = rank<RankItem & { row?: NoteRow; hit?: (typeof hits)[number]; ref?: RefHit }>([...notes, ...refs], { includeHidden: true });
@@ -609,6 +638,7 @@ function search(env: ReadToolEnv, args: Record<string, unknown>, maxChars: numbe
   const noteRows = kept.flatMap((r) => (r.item.row === undefined ? [] : [r.item.row]));
   const extra: Record<string, unknown> = { matched: notes.length + refs.length };
   if (scope !== 'notes') extra['scope'] = scope;
+  if (embeddings !== undefined) extra['embeddings'] = embeddings;
   return listResponse('search', format, items, maxChars, { ...extra, ...proposedNotice(noteRows, noteRows.length < kept.length) });
 }
 
@@ -723,7 +753,7 @@ export function registerReadTools(env: ReadToolEnv, registry: ToolRegistry): voi
     {
       name: 'search',
       modes: MODES,
-      description: 'Full-text (BM25) search over the vault. Returns ranked passages with path, heading_path, excerpt, and a revision-pinned citation.',
+      description: 'Full-text (BM25) search over the vault, fused with embedding similarity when embeddings are configured. Returns ranked passages with path, heading_path, excerpt, and a revision-pinned citation.',
       schema: env.mode === 'journal' ? SEARCH_SCHEMA_JOURNAL : SEARCH_SCHEMA,
       auditArgs: { folder: 'path' },
       handler: (args, ctx) => search(env, args, ctx.maxChars),

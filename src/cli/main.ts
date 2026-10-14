@@ -117,7 +117,7 @@ export function main(argv: readonly string[]): number | Promise<number> {
       return report.ok ? 0 : 1;
     }
     case 'reindex':
-      return emit(runReindex(rest));
+      return runReindex(rest).then(emit);
     case 'index':
       return emit(runIndexCommand(rest));
     case 'audit':

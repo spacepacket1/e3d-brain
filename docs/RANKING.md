@@ -68,8 +68,12 @@ Results are compared by, in order:
 2. **Tier:** T1 first, T8 last, revealed hidden notes after T8.
 3. **Relevance:** the FTS5 `bm25()` value (lower is more relevant), rounded
    to 1e-6 before comparison (I11), so float noise never decides an order.
-   When Phase 12 is on, the vector rank is fused here via RRF. Listings
-   without a query have no relevance and fall through to the next rule.
+   With embeddings on (Phase 12) and a plain-words query, relevance is the
+   Reciprocal Rank Fusion score instead: `rank.ts` ranks the BM25 list and the
+   vector list (cosine, at least 0.3, at most 50 chunks) separately, each with
+   ties broken by path then ordinal, and a chunk scores the sum of
+   1/(60 + rank) over the lists it is in. Higher is better, rounded to 1e-6.
+   Listings without a query have no relevance and fall through to the next rule.
 4. **Path:** bytewise on the NFC form of the vault path, then bytewise on the
    raw name (the listing order of Phase 2, `comparePaths`).
 5. **Ordinal:** the chunk ordinal within the note.

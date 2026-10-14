@@ -12,11 +12,11 @@ export type Db = BetterSqlite3.Database;
 export const INDEX_FILE = 'index.db';
 export const BUSY_TIMEOUT_MS = 10000;
 /** Bump when the table layout changes: an index with another version is rebuilt. */
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 const TABLES = [
   'meta', 'notes', 'chunks', 'chunks_fts', 'links', 'tags', 'aliases', 'headings', 'problems', 'cites', 'note_revisions',
-  'missing_ids',
+  'missing_ids', 'chunk_vectors',
 ];
 
 const SCHEMA = `
@@ -116,6 +116,16 @@ CREATE TABLE note_revisions (id TEXT NOT NULL, rev TEXT NOT NULL, first_seen TEX
 -- Identities that were indexed and are no longer present (rename history; cleared by a full rebuild).
 CREATE TABLE missing_ids (
   id TEXT PRIMARY KEY, provisional INTEGER NOT NULL, last_path TEXT NOT NULL, last_rev TEXT NOT NULL, since TEXT NOT NULL
+) STRICT;
+-- Optional embeddings (Phase 12): one unit-length float32 vector per chunk, valid while chunk_rev and model match.
+CREATE TABLE chunk_vectors (
+  note_path TEXT NOT NULL,
+  ordinal INTEGER NOT NULL,
+  chunk_rev TEXT NOT NULL,        -- content hash of the chunk text the vector was made from
+  model TEXT NOT NULL,
+  dimensions INTEGER NOT NULL,
+  vector BLOB NOT NULL,
+  PRIMARY KEY (note_path, ordinal)
 ) STRICT;
 CREATE TABLE problems (
   note_path TEXT NOT NULL, ordinal INTEGER NOT NULL, kind TEXT NOT NULL, field TEXT, detail TEXT NOT NULL,

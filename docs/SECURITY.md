@@ -256,6 +256,14 @@ keys and invalid values are errors (I10).
   archive notes hold whole scrubbed conversations, so heuristic scrubber
   misses (Phase 7 residuals) persist in the vault, and anything that syncs
   the vault carries them.
+- Embeddings (Phase 12, I3, I5): off by default (`provider: none` runs no
+  `src/net/` code, asserted by a spy test). The Ollama client lives in
+  `src/net/`; the base URL must be loopback or in `network.allowedHosts`, which
+  is enforced at config load and again when the client is built. Redirects are
+  refused, responses are size-capped, and requests time out. Requests carry
+  only the model name and scrubbed text (chunks and search queries pass through
+  the non-strict scrubber first). Vectors are derived data in `index.db`
+  (rebuildable); an unreachable server degrades to BM25 with a warning.
 - Reference library (Phase 11, I1, I3, I5, I7): `ebrain refs add|remove|reindex`
   are owner CLI commands; MCP only reads `refs.db` (opened read-only per
   call, from `src/mcp/` through `src/refs/db.ts` only). Source files are

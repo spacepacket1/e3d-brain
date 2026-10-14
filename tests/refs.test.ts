@@ -331,11 +331,11 @@ describe('refs add (EPUB) and search scope refs', () => {
     assert.equal(treeChecksum(e.vault), vaultBefore);
   });
 
-  it('reindex --full after deleting index.db leaves refs.db intact', () => {
+  it('reindex --full after deleting index.db leaves refs.db intact', async () => {
     const before = fileSum(path.join(e.stateDir, 'refs.db'));
     fs.rmSync(path.join(e.stateDir, 'index.db'), { force: true });
     for (const f of ['index.db-wal', 'index.db-shm']) fs.rmSync(path.join(e.stateDir, f), { force: true });
-    const r = runReindex(['--full'], { env: e.env, homeDir: e.base });
+    const r = await runReindex(['--full'], { env: e.env, homeDir: e.base });
     assert.equal(r.code, 0, r.stderr);
     assert.equal(fileSum(path.join(e.stateDir, 'refs.db')), before);
   });

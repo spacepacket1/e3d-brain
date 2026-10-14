@@ -201,6 +201,7 @@ const ORDER_ALLOWED: Record<string, string> = {
   'src/import/sources.ts': 'ChatGPT thread walked leaf-to-root, then reversed to conversation order',
   'src/import/load.ts': 'source files in name order (deterministic turn order)',
   'src/import/archive.ts': 'conversations by id and archive year dirs in name order; turn times for start/end',
+  'src/index/vectors.ts': 'embedding sync visits missing chunks in listing order (selection and fusion live in rank.ts)',
   'src/refs/db.ts': 'refs list in title order; chunk navigation in (chapter, ordinal) reading order',
   'src/refs/library.ts': 'refs reindex candidates in ref id order',
 };

@@ -9,11 +9,14 @@
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { ensurePrivateDir, readExternalFile, SafePathError, type SafePath } from './safe-path.js';
+import { checkBaseUrl, HostPolicyError } from './net/hosts.js';
 import { checkExtraPatterns } from './scrub/scrub.js';
 
 export type PrincipalType = 'human' | 'agent';
 export type Mode = 'inbox' | 'journal' | 'read-only';
-export type EmbeddingsProvider = 'none';
+export type EmbeddingsProvider = 'none' | 'ollama';
+/** Where vectors live. `blob`: plain SQLite BLOBs with brute-force cosine (sqlite-vec is not a dependency). */
+export type EmbeddingsStore = 'blob';
 
 export interface Config {
   vaultPath: string;
@@ -23,10 +26,20 @@ export interface Config {
   limits: { maxCharsPerCall: number };
   network: { allowedHosts: string[] };
   scrub: { extraPatterns: string[] };
-  embeddings: { provider: EmbeddingsProvider };
+  embeddings: EmbeddingsConfig;
   audit: { maxSegmentMB: number };
   journal: JournalConfig;
   refs: RefsConfig;
+}
+
+/** Optional local embeddings (Phase 12). Provider `none` (the default) means BM25 only and no network code runs. */
+export interface EmbeddingsConfig {
+  provider: EmbeddingsProvider;
+  /** Changing it re-embeds every chunk on the next `ebrain reindex`. */
+  model: string;
+  /** Ollama base URL: loopback, or a host listed in `network.allowedHosts`. */
+  baseUrl: string;
+  store: EmbeddingsStore;
 }
 
 /** Reference-library output limits for `search` (Phase 11). */
@@ -74,11 +87,14 @@ export const DEFAULT_REFS: Readonly<RefsConfig> = { excerptChars: 400, maxHits: 
 /** Upper bounds for `refs.*`: excerpts and hits stay short so a book cannot be dumped through `search`. */
 export const MAX_REF_EXCERPT_CHARS = 1000;
 export const MAX_REF_HITS = 20;
+export const DEFAULT_EMBEDDINGS_MODEL = 'nomic-embed-text';
+export const DEFAULT_EMBEDDINGS_URL = 'http://127.0.0.1:11434';
 export const PRINCIPAL_ID_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 
 const MODES: readonly Mode[] = ['inbox', 'journal', 'read-only'];
 const PRINCIPAL_TYPES: readonly PrincipalType[] = ['human', 'agent'];
-const EMBEDDINGS_PROVIDERS: readonly EmbeddingsProvider[] = ['none'];
+const EMBEDDINGS_PROVIDERS: readonly EmbeddingsProvider[] = ['none', 'ollama'];
+const EMBEDDINGS_STORES: readonly EmbeddingsStore[] = ['blob'];
 const HOSTNAME_RE = /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/;
 
 export interface EnvOptions {
@@ -209,8 +225,20 @@ export function parseConfig(raw: unknown, opts: { homeDir?: string } = {}): Conf
   const badPatterns = checkExtraPatterns(extraPatterns);
   if (badPatterns !== undefined) throw new ConfigError(`config key "scrub.extraPatterns" ${badPatterns}`);
 
-  const embeddingsRaw = section(raw, 'embeddings', ['provider'], false);
+  const embeddingsRaw = section(raw, 'embeddings', ['provider', 'model', 'baseUrl', 'store'], false);
   const provider = oneOf(str(embeddingsRaw, 'provider', 'embeddings.provider') ?? 'none', EMBEDDINGS_PROVIDERS, 'embeddings.provider');
+  const model = str(embeddingsRaw, 'model', 'embeddings.model') ?? DEFAULT_EMBEDDINGS_MODEL;
+  if (model === '' || model.length > 200 || /[\u0000-\u001f\u007f]/.test(model)) {
+    throw new ConfigError('config key "embeddings.model" must be a non-empty string of at most 200 characters without control characters');
+  }
+  let baseUrl = str(embeddingsRaw, 'baseUrl', 'embeddings.baseUrl') ?? DEFAULT_EMBEDDINGS_URL;
+  try {
+    baseUrl = checkBaseUrl(baseUrl, allowedHosts);
+  } catch (err) {
+    if (!(err instanceof HostPolicyError)) throw err;
+    throw new ConfigError(`config key "embeddings.baseUrl" ${err.message}`);
+  }
+  const store = oneOf(str(embeddingsRaw, 'store', 'embeddings.store') ?? 'blob', EMBEDDINGS_STORES, 'embeddings.store');
 
   const auditRaw = section(raw, 'audit', ['maxSegmentMB'], false);
   const maxSegmentMB = auditRaw.maxSegmentMB === undefined ? DEFAULT_AUDIT_SEGMENT_MB : auditRaw.maxSegmentMB;
@@ -253,7 +281,7 @@ export function parseConfig(raw: unknown, opts: { homeDir?: string } = {}): Conf
     limits: { maxCharsPerCall: maxChars },
     network: { allowedHosts },
     scrub: { extraPatterns },
-    embeddings: { provider },
+    embeddings: { provider, model, baseUrl, store },
     audit: { maxSegmentMB },
     journal,
     refs,

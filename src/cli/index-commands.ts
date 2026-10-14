@@ -2,6 +2,8 @@
 
 import { ConfigError, ensureStateDir, loadConfig, type EnvOptions } from '../config.js';
 import { dumpIndex } from '../index/dump.js';
+import { syncEmbeddings, type EmbedSummary } from '../index/vectors.js';
+import { createEmbedder } from '../net/ollama.js';
 import { closeIndex, indexTotals, openIndex, reindex, type RefreshResult } from '../index/indexer.js';
 
 export interface CommandResult {
@@ -52,11 +54,42 @@ export function formatSummary(r: RefreshResult, t: ReturnType<typeof indexTotals
   return `${lines.join('\n')}\n`;
 }
 
-export function runReindex(args: readonly string[], opts: EnvOptions = {}): CommandResult {
+/** The embeddings line of the reindex summary; absent for provider `none`. */
+export function formatEmbeddings(e: EmbedSummary): string {
+  const w = e.warnings > 0 ? `; warnings ${e.warnings}: ${e.warning ?? 'embedding failed'} (search falls back to BM25 for those chunks)` : '';
+  return `embeddings (${e.provider}, ${e.model}): embedded ${e.embedded}, unchanged ${e.unchanged}, failed ${e.failed}${w}\n`;
+}
+
+export async function runReindex(args: readonly string[], opts: EnvOptions = {}): Promise<CommandResult> {
   const full = args.includes('--full');
   const unknown = args.find((a) => a !== '--full');
   if (unknown !== undefined) return { code: 2, stdout: '', stderr: `ebrain reindex: unexpected argument ${JSON.stringify(unknown)}\n` };
-  return withIndex(opts, false, (h) => formatSummary(reindex(h, { full }), indexTotals(h.db)));
+  const base = withIndex(opts, false, (h) => formatSummary(reindex(h, { full }), indexTotals(h.db)));
+  if (base.code !== 0) return base;
+  // Embeddings (Phase 12): only with a configured provider; a failure is a warning, never a failed reindex.
+  let config: ReturnType<typeof loadConfig>['config'];
+  try {
+    config = loadConfig(opts).config;
+  } catch {
+    return base;
+  }
+  let embedder: ReturnType<typeof createEmbedder>;
+  try {
+    embedder = createEmbedder(config.embeddings, config.network.allowedHosts);
+  } catch (err) {
+    return { ...base, stdout: `${base.stdout}embeddings: skipped, warnings 1: ${message(err)}\n` };
+  }
+  if (embedder === undefined) return base;
+  let h: ReturnType<typeof openIndex> | undefined;
+  try {
+    h = openIndex({ vaultPath: config.vaultPath, stateDir: ensureStateDir(config), mustExist: true });
+    const summary = await syncEmbeddings(h.db, embedder, { extraPatterns: config.scrub.extraPatterns });
+    return { ...base, stdout: `${base.stdout}${formatEmbeddings(summary)}` };
+  } catch (err) {
+    return { ...base, stdout: `${base.stdout}embeddings: failed, warnings 1: ${message(err)}\n` };
+  } finally {
+    if (h !== undefined) closeIndex(h);
+  }
 }
 
 export function runIndexCommand(args: readonly string[], opts: EnvOptions = {}): CommandResult {

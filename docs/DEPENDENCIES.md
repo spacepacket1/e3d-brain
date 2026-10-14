@@ -24,3 +24,7 @@ count from `npm ls --all`. Adding a dependency requires a line here.
 ## XHTML text extraction (Phase 11): in-repo, no dependency
 
 - EPUB XHTML, OPF, NCX, and nav documents are read by a minimal in-repo tokenizer, `src/refs/xml.ts` (about 300 lines), instead of a parser package such as `htmlparser2`. Justification: text extraction needs only tags, attributes, character references, and raw-text `<script>`/`<style>` handling; a small pure function is easy to audit, adds no transitive packages (Transitive: 0), and by construction cannot fetch URLs or expand external entities (doctypes, including internal subsets, and processing instructions are skipped; only a fixed table of named references and numeric references is decoded). Zip reading reuses `yauzl` (Phase 10). PDFs use the optional external `pdftotext` binary (not a package; see `src/exec/pdftotext.ts`).
+
+## Vector storage (Phase 12): BLOBs, no dependency
+
+- Vectors are stored as unit-length float32 BLOBs in `index.db` and searched by brute-force cosine similarity (exact; fine at personal-vault scale). `sqlite-vec` was not added: it is a native extension that must be loaded at runtime, and a plain table keeps the install to the existing `better-sqlite3`. Transitive: 0. `embeddings.store` selects the store; `blob` is the only value. The Ollama client uses Node's built-in `fetch`, confined to `src/net/`.

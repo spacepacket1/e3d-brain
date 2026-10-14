@@ -123,6 +123,8 @@ export interface RankItem extends TierInput {
   bm25?: number;
   /** Reference books (`scope: refs`) always come after notes. */
   source?: 'note' | 'ref';
+  /** Hybrid search (Phase 12): the Reciprocal Rank Fusion score; when set on both items it replaces `bm25`. Higher is better. */
+  fused?: number;
   /** `created` (ISO 8601); used only with `newestFirst`. */
   created?: string | null;
 }
@@ -159,9 +161,15 @@ export function compareRanked<T extends RankItem>(a: Ranked<T>, b: Ranked<T>, op
   const ta = tierKey(a.tier);
   const tb = tierKey(b.tier);
   if (ta !== tb) return ta - tb;
-  const qa = quantize(a.item.bm25 ?? 0);
-  const qb = quantize(b.item.bm25 ?? 0);
-  if (qa !== qb) return qa < qb ? -1 : 1;
+  if (a.item.fused !== undefined && b.item.fused !== undefined) {
+    const fa = quantize(a.item.fused);
+    const fb = quantize(b.item.fused);
+    if (fa !== fb) return fa > fb ? -1 : 1;
+  } else {
+    const qa = quantize(a.item.bm25 ?? 0);
+    const qb = quantize(b.item.bm25 ?? 0);
+    if (qa !== qb) return qa < qb ? -1 : 1;
+  }
   if (opts.newestFirst === true) {
     const ca = createdKey(a.item);
     const cb = createdKey(b.item);
@@ -181,4 +189,49 @@ export function rank<T extends RankItem>(items: readonly T[], opts: RankOptions 
   const ranked = items.map((item) => ({ item, tier: tierOf(item) }));
   const visible = opts.includeHidden === true ? ranked : ranked.filter((r) => r.tier !== 'hidden');
   return visible.sort((a, b) => compareRanked(a, b, opts));
+}
+
+// ---- hybrid search (Phase 12) ----
+
+/** Reciprocal Rank Fusion constant (Cormack et al.). */
+export const RRF_K = 60;
+/** Vector candidates kept per query, and the cosine below which a chunk is not a candidate. */
+export const VECTOR_CANDIDATES = 50;
+export const VECTOR_MIN_COSINE = 0.3;
+
+export interface ChunkKey {
+  path: string;
+  ordinal: number;
+}
+
+export function chunkKey(k: ChunkKey): string {
+  return `${k.path}\0${k.ordinal}`;
+}
+
+function byPathThenOrdinal(a: ChunkKey, b: ChunkKey): number {
+  return comparePaths(a.path, b.path) || a.ordinal - b.ordinal;
+}
+
+/** The most similar chunks: cosine at or above the floor, best first (quantized), then path, then ordinal; at most `limit`. */
+export function nearestChunks<T extends ChunkKey & { cosine: number }>(scored: readonly T[], limit: number = VECTOR_CANDIDATES): T[] {
+  return scored
+    .filter((s) => s.cosine >= VECTOR_MIN_COSINE)
+    .sort((a, b) => quantize(b.cosine) - quantize(a.cosine) || byPathThenOrdinal(a, b))
+    .slice(0, limit);
+}
+
+/**
+ * Reciprocal Rank Fusion of a BM25 list and a vector list. Each list is
+ * ranked on its own (BM25 ascending, cosine descending, both quantized, ties
+ * by path then ordinal); a chunk scores the sum of 1/(RRF_K + rank) over the
+ * lists it appears in. Returns the fused score by `chunkKey`.
+ */
+export function fuseRrf(bm25: readonly (ChunkKey & { bm25: number })[], vectors: readonly (ChunkKey & { cosine: number })[]): Map<string, number> {
+  const fused = new Map<string, number>();
+  const add = (keys: readonly ChunkKey[]) => {
+    keys.forEach((k, i) => fused.set(chunkKey(k), (fused.get(chunkKey(k)) ?? 0) + 1 / (RRF_K + i + 1)));
+  };
+  add([...bm25].sort((a, b) => quantize(a.bm25) - quantize(b.bm25) || byPathThenOrdinal(a, b)));
+  add([...vectors].sort((a, b) => quantize(b.cosine) - quantize(a.cosine) || byPathThenOrdinal(a, b)));
+  return fused;
 }

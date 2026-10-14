@@ -101,6 +101,20 @@ export function searchChunks(db: Db, match: string): ChunkHit[] {
     .all(match) as ChunkHit[];
 }
 
+/** The chunks at the given (path, ordinal) keys, as hits without a BM25 value (vector-only results). */
+export function chunkHitsByKeys(db: Db, keys: readonly { path: string; ordinal: number }[]): ChunkHit[] {
+  const stmt = db.prepare(
+    `SELECT ${NOTE_SELECT}, c.ordinal AS ordinal, c.heading_path AS heading_path, c.text AS text, substr(c.text, 1, 200) AS snippet, 0 AS bm25
+     FROM chunks c JOIN notes n ON n.path = c.note_path WHERE c.note_path = ? AND c.ordinal = ?`,
+  );
+  const out: ChunkHit[] = [];
+  for (const k of keys) {
+    const row = stmt.get(k.path, k.ordinal) as ChunkHit | undefined;
+    if (row !== undefined) out.push(row);
+  }
+  return out;
+}
+
 export function allNoteRows(db: Db): NoteRow[] {
   return db.prepare(`SELECT ${NOTE_SELECT} FROM notes n`).all() as NoteRow[];
 }

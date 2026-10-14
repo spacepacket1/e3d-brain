@@ -181,7 +181,10 @@ Optional keys may be omitted to take their defaults.
 | `limits.maxCharsPerCall` | no | `10000` | integer 1-10000; can only lower the built-in ceiling |
 | `network.allowedHosts` | no | `[]` | lowercase hostnames (no scheme, port, or wildcard); empty means no network |
 | `scrub.extraPatterns` | no | `[]` | literal strings (not regexes), case-sensitive, 4-256 characters each, at most 64, no line breaks; redacted as `extra-pattern` (see Scrubbing) |
-| `embeddings.provider` | no | `none` | `none` (other providers are added in Phase 12) |
+| `embeddings.provider` | no | `none` | `none` (BM25 only, no network code runs) or `ollama` (see Optional embeddings) |
+| `embeddings.model` | no | `nomic-embed-text` | non-empty, at most 200 characters; changing it re-embeds every chunk on the next `ebrain reindex` |
+| `embeddings.baseUrl` | no | `http://127.0.0.1:11434` | `http(s)` URL without credentials, query, or fragment; a non-loopback host must be in `network.allowedHosts` or the config is rejected at load |
+| `embeddings.store` | no | `blob` | `blob`: vectors as SQLite BLOBs with brute-force cosine (the only store; `sqlite-vec` is not a dependency) |
 | `audit.maxSegmentMB` | no | `50` | number above 0, at most 4096; audit segment size before a new segment starts |
 | `journal.ttlDays` | no | `90` | integer 1-36500; `expires` = `created` + this many days on new journal entries |
 | `journal.maxEntryChars` | no | `4000` | integer 1-100000; longest `journal_append` body (longer is rejected, never truncated) |
@@ -434,6 +437,37 @@ ebrain refs reindex              # rebuild refs.db from the original source file
   `missing` and one whose content changed is reported `changed` (its rows are
   kept); the command then exits 1. Books removed with `refs remove` are not
   brought back while `refs.db` remembers the removal.
+
+## Optional embeddings (hybrid search)
+
+Off by default: with `embeddings.provider: "none"` everything works with BM25
+only and no network code is touched. To add semantic matches, run a local
+[Ollama](https://ollama.com) and set:
+
+```json
+"embeddings": { "provider": "ollama", "model": "nomic-embed-text" }
+```
+
+- `ebrain reindex` embeds only new or changed chunks and prints a line such as
+  `embeddings (ollama, nomic-embed-text): embedded 12, unchanged 340, failed 0`.
+  Vectors are stored in `index.db` (`chunk_vectors`) with the model, the
+  dimensions, and a content hash. A chunk is re-embedded when its text changes;
+  changing `embeddings.model` re-embeds all of them. Identical text elsewhere
+  reuses its vector.
+- A failing or unreachable server never fails the reindex: the summary counts
+  `warnings` and `failed` chunks, and those chunks stay BM25-only until the
+  next reindex.
+- `search` embeds the query and fuses the BM25 and vector lists with
+  Reciprocal Rank Fusion (see RANKING.md). Its header says
+  `"embeddings":"hybrid"`, or `"unavailable"` when the server could not be
+  reached (the results are then BM25 only). `advanced` queries and
+  `scope: refs` are BM25 only. Vector candidates need a cosine similarity of at
+  least 0.3. Chunks without a vector (not yet reindexed) are found by BM25
+  only; the MCP server never embeds chunks, only the query.
+- Only scrubbed text is sent: each chunk and the query pass through the
+  scrubber (non-strict) first. The host must be loopback or listed in
+  `network.allowedHosts`. Remote hosts are an owner decision: the scrubbed
+  chunk text of your vault leaves the machine.
 
 ## Auditing
 
