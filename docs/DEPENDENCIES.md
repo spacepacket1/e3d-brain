@@ -8,6 +8,8 @@ count from `npm ls --all`. Adding a dependency requires a line here.
 
 - `better-sqlite3` 13.0.3: synchronous SQLite with FTS5 for the derived index (I7); the one native module, ships prebuilds; `npm run build:native` rebuilds it. Transitive: 1 (`node-addon-api`, build-time headers).
 
+- `yaml` 2.9.1: YAML 1.2 frontmatter parsing (Phase 2); used with the `core` schema (no custom tags or timestamps), alias expansion capped. Transitive: 0.
+
 ## Development
 
 - `typescript` 6.0.3: strict TypeScript compiler (last JavaScript-based release; no platform binaries). Transitive: 0.
@@ -16,4 +18,4 @@ count from `npm ls --all`. Adding a dependency requires a line here.
 
 ## Planned (added by the phase that first uses them)
 
-- `yaml` (Phase 2, frontmatter), `@modelcontextprotocol/sdk` (Phase 6), a zip reader (Phase 10), an XHTML text extractor (Phase 11).
+- `@modelcontextprotocol/sdk` (Phase 6), a zip reader (Phase 10), an XHTML text extractor (Phase 11).

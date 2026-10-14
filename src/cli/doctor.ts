@@ -4,6 +4,8 @@
 
 import { randomBytes } from 'node:crypto';
 import { checkFts5 } from '../index/sqlite.js';
+import { findCollisions } from '../vault/names.js';
+import { scanVault } from '../vault/scan.js';
 import { ConfigError, ensureStateDir, loadConfig, type Config, type EnvOptions } from '../config.js';
 import {
   createExclusive,
@@ -40,11 +42,30 @@ export function probeCaseSensitivity(stateDir: SafePath): boolean {
   }
 }
 
+/**
+ * Scan the vault (read-only) and report paths that differ only by case or
+ * Unicode normalization: both are indexed, but they are one file on APFS and
+ * two on ext4, so a synced vault diverges. A warning, not a failure.
+ */
+function checkVaultNames(config: Config, lines: string[]): void {
+  const scan = scanVault(config.vaultPath);
+  const s = scan.skipped;
+  lines.push(`vault notes: ${scan.files.length} (skipped: symlinks ${s.symlinks}, hidden ${s.hidden}, unsafe names ${s.unsafeNames})`);
+  const collisions = findCollisions(scan.files.map((f) => f.relPath));
+  if (collisions.length === 0) {
+    lines.push('path collisions: none');
+    return;
+  }
+  lines.push(`path collisions: WARN ${collisions.length} (paths differing only by case or Unicode normalization)`);
+  for (const g of collisions) lines.push(`  collision: ${g.map((p) => JSON.stringify(p)).join(' ')}`);
+}
+
 function checkVault(config: Config, lines: string[]): { ok: boolean; dev?: number } {
   try {
     const root = resolveInVault(config.vaultPath, '');
     const entries = readDirSafe(root);
     lines.push(`vault: ${root} (exists, readable, ${entries.length} entries)`);
+    checkVaultNames(config, lines);
     return { ok: true, dev: statSafe(root)?.dev };
   } catch (err) {
     lines.push(`vault: FAIL ${config.vaultPath}: ${message(err)}`);

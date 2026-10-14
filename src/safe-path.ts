@@ -25,6 +25,7 @@ export type SafePathErrorCode =
   | 'symlink'
   | 'exists'
   | 'not-file'
+  | 'too-large'
   | 'changed';
 
 export class SafePathError extends Error {
@@ -181,6 +182,20 @@ function resolveUnder(root: string, relPath: string, vaultRules: boolean): SafeP
 /** Resolve an external relative path inside the vault (I1). Hidden and protected names are refused. */
 export function resolveInVault(root: string, relPath: string): SafePath {
   return resolveUnder(root, relPath, true);
+}
+
+/**
+ * Join one directory-entry name (as returned by `readDirSafe`) onto an
+ * already-resolved vault directory, applying the vault name rules (hidden and
+ * protected names, separators, control characters are refused). Unlike
+ * `resolveInVault` this does not realpath: it is for the scanner, which lstats
+ * every entry and never follows symlinks (it skips them), and reads files with
+ * O_NOFOLLOW.
+ */
+export function vaultChild(parent: SafePath, name: string): SafePath {
+  const segments = splitRelative(name, true);
+  if (segments.length !== 1) fail('invalid', 'entry name must be a single path segment');
+  return brand(path.join(parent, name));
 }
 
 /** Resolve a relative path inside the state directory (I1). */
@@ -350,6 +365,41 @@ export function readFileSafe(p: SafePath, encoding?: 'utf8'): Buffer | string {
     return encoding === 'utf8' ? buf.toString('utf8') : buf;
   } finally {
     fs.closeSync(fd);
+  }
+}
+
+/**
+ * Read a regular file without following a final symlink, returning the
+ * nanosecond-precision fstat taken on the same descriptor *before* reading
+ * (so a concurrent edit makes the stat older than the content, never newer).
+ * `maxBytes` refuses larger files with SafePathError('not-file') unread.
+ */
+export function readFileWithStatSafe(p: SafePath, opts: { maxBytes?: number } = {}): { data: Buffer; stat: fs.BigIntStats } {
+  let fd: number;
+  try {
+    fd = fs.openSync(p, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  } catch (err) {
+    if (errCode(err) === 'ELOOP') fail('symlink', 'file changed to a symlink');
+    throw err;
+  }
+  try {
+    const stat = fs.fstatSync(fd, { bigint: true });
+    if (!stat.isFile()) fail('not-file', 'not a regular file');
+    if (opts.maxBytes !== undefined && stat.size > BigInt(opts.maxBytes)) fail('too-large', 'file exceeds the size limit');
+    return { data: fs.readFileSync(fd), stat };
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+/** lstat with nanosecond (bigint) fields; undefined if the path does not exist. */
+export function statBigSafe(p: SafePath): fs.BigIntStats | undefined {
+  try {
+    return fs.lstatSync(p, { bigint: true });
+  } catch (err) {
+    const code = errCode(err);
+    if (code === 'ENOENT' || code === 'ENOTDIR') return undefined;
+    throw err;
   }
 }
 

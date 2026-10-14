@@ -71,6 +71,37 @@ Later phases add keys here in the same change that adds them to the schema.
 with mode `0700`; files the tool creates are `0600`. It is never synced
 between machines and never placed inside the vault.
 
+## Search index
+
+`ebrain reindex` scans the vault and updates `<stateDir>/index.db` (SQLite,
+WAL mode). It is incremental: unchanged files are recognized by content hash;
+`ebrain reindex --full` rebuilds every row from scratch. The index is derived
+data: deleting `index.db` (with its `-wal`/`-shm` files) and running
+`ebrain reindex --full` reproduces it. Indexing never writes to the vault.
+
+```bash
+ebrain reindex          # incremental; prints counts, including malformed frontmatter
+ebrain reindex --full   # rebuild from scratch
+ebrain index dump       # canonical text dump of the index (for comparisons)
+```
+
+The MCP server and the writers refresh the index cheaply (by file stat) before
+reads and after writes, so `reindex` is only needed after bulk changes or to
+force full fidelity.
+
+What gets indexed: every `*.md` file. Skipped: dot-directories and dot-files
+(`.obsidian/`, `.git/`, `.trash/`, temp files), symlinks (never followed),
+names the vault path rules refuse, and notes over 8 MiB. Malformed
+frontmatter, invalid dates, unknown statuses, and wrongly typed fields are
+counted in the `reindex` summary; the note body is still indexed. Paths that
+differ only by case or Unicode normalization (one file on macOS, two on Linux)
+are both indexed and reported by `ebrain doctor` as collisions.
+
+**The state directory must be on a local filesystem**, not NFS, EFS, SMB, or
+another network filesystem: several processes (the CLI and any number of MCP
+servers) share `index.db` through SQLite WAL mode, which needs working shared
+memory and POSIX locks.
+
 ## Vault versioning
 
 Keeping the vault in `git` is recommended for diffing and rolling back what an

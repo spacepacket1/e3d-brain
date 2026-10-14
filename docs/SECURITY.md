@@ -124,6 +124,12 @@ They apply to every phase and are tested. Later phases must not weaken them.
   replaced) is temp file + `fsync` + `rename`. `renameSafe` without
   `overwrite` uses `link` + `unlink` for files; for directories it falls back
   to check-then-rename (same residual race).
+- The vault scanner (Phase 2) never follows symlinks: it skips every entry
+  `readdir` reports as a symlink, lstats each file again before reading,
+  and reads with `O_NOFOLLOW`; directories are lstat'ed again just before descending. Child paths are joined with `vaultChild`
+  (vault name rules, no realpath) below the realpath'd root. A directory
+  swapped for a symlink between `readdir` and descending into it is the same
+  accepted residual race.
 - All files the tool creates get mode `0600` and directories `0700`, set with
   explicit open modes plus `fchmod`/`chmod`, never left to the umask (I8).
 
