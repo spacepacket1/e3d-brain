@@ -5,12 +5,14 @@ config override env var `EBRAIN_CONFIG`.
 
 ## Spec Revision (2026-10-14)
 
-Phases were renumbered after a pre-build review (2 and 3 were split, the audit
-log was pulled out of agent mode, and several contradictions were resolved).
-Old to new: 1->1, 2->2+3, 3->4+5, 12 (audit part)->6, 4->7, 5->8, 12 (journal
-part)->9, 6->10, 7->11, 8->12, 9->13, 10->14, 11->15. Tests are
-`tests/phaseNN.sh` with the new numbers. `spec2code` accepts only integer
-phase numbers, hence no lettered sub-phases.
+Revised after two review passes (a pre-build review and an `e3d-debate` with
+two models; transcript in `docs/debates/2026-10-14-spec-review/`). Phases were
+split and reordered; `spec2code` accepts only integer phase numbers, hence no
+lettered sub-phases. Final order: 1 scaffold, 2 scanner/index, 3 identity and
+citation grammar, 4 fence/ranking/registry/dispatch, 5 principal enforcement
+and audit, 6 MCP server and packaging, 7 scrubber, 8 inbox, 9 agent journal,
+10 conversation importers, 11 reference library, 12 embeddings, 13 hooks,
+14 LLM layer and `propose`, 15 HTTP transport. Tests are `tests/phaseNN.sh`.
 
 ## Overview
 
@@ -146,8 +148,8 @@ Rules that hold in every mode:
   `<stateDir>/audit.jsonl` (principal id, tool, arguments' paths/ids, result
   counts, timestamp; never note bodies, query text, or secrets). The audit log
   is append-only by convention and tested for no truncation by the server. It
-  is implemented in Phase 6; the single dispatch function every MCP tool call
-  goes through is built in Phase 4 (Phase 5 onward registers tools only
+  is implemented in Phase 5; the single dispatch function every MCP tool call
+  goes through is built in Phase 4 (Phase 6 onward registers tools only
   through it), so auditing is added there without touching individual tools.
 - **Multiple brains per principal** are separate instances, each its own MCP
   server entry in the principal's client config.
@@ -176,6 +178,14 @@ These apply to every phase and are tested. Later phases must not weaken them.
   files, `transcript_path`) are accepted only through `resolveInRoot(root,
   relPath)` or `openExternalFile(absPath, allowedRoots)`, where the caller
   names the allowed root explicitly, with the same realpath and symlink rules.
+  Temporary files are created in the **same directory** as their target,
+  dot-prefixed (the scanner skips dot-files); `createExclusive` publishes with
+  `link(tmp, final)` (EEXIST means collision) and falls back to `O_EXCL` where
+  hard links are unavailable. Threat model: the vault and state dir belong to a
+  trusted local owner and are not concurrently modified by an adversary; the
+  residual symlink-swap race between check and use is accepted and documented
+  in `docs/SECURITY.md`, and every write revalidates the parent directory's
+  realpath immediately before publishing.
 - **I2 Write fence (by mode).** The instance's configured mode fixes the only
   place MCP-callable writes can land: `inbox` -> `<vault>/_inbox/`;
   `journal` -> `<vault>/journal/<principal-id>/` and only by creating new
@@ -197,10 +207,13 @@ These apply to every phase and are tested. Later phases must not weaken them.
   binaries (`pdftotext`, `git`) with argument arrays, never a shell string.
 - **I4 No telemetry / auto-update / runtime installs.** Enforced by a source
   scan test.
-- **I5 Scrub before persist.** Text from conversations, books, captures, and
-  hook payloads passes through the scrubber before it is written to the vault,
+- **I5 Scrub before persist.** Text from conversations, books, captures,
+  workspace imports, and hook payloads (everything the tool ingests or an
+  MCP client submits) passes through the scrubber before it is written to the vault,
   the raw archive, the index, or any embedding request. Scrubbed secrets are
-  never logged.
+  never logged. Notes the owner authored directly in the vault are trusted
+  and are indexed as-is; the scrubber guards what enters the vault through
+  this tool, not what the owner types.
 - **I6 Retrieval output is untrusted data.** Every tool result that includes
   note or archive text wraps it in a fenced block whose fence is longer than
   any backtick run inside the data, labels it as reference data not
@@ -233,8 +246,8 @@ These apply to every phase and are tested. Later phases must not weaken them.
   (`rev`, a content hash, normalization defined in Phase 3). Tools expose both. Citations to notes are
   revision-pinned and can be checked for staleness. The index never writes ids
   into human-authored notes.
-- **I13 One ranking function.** Final result ordering is computed in exactly
-  one module, `src/index/rank.ts`, with a documented tier table in
+- **I13 One ranking function.** The final ordering of retrieval results is
+  computed in exactly one module, `src/index/rank.ts`, with a documented tier table in
   `docs/RANKING.md`. Phases add tiers there; no other module reorders results.
 
 ### Note schema (shared by all phases)
@@ -255,7 +268,7 @@ on any rewrite the server performs (later specs extend this schema).
 | `accepted`, `applied` | timestamps set when a note is accepted / a proposal is applied |
 | `superseded_by`, `superseded_at`, `supersedes` | supersession links (ids) and the supersession time; read by the `as_of` filter |
 | `archived_at`, `merged_into` | archival time and merge target id; archived notes live under `_archive/` and are hidden by default |
-| `derived_from` | list of citations (Phase 4 grammar) a note was derived from |
+| `derived_from` | list of citations (Phase 3 grammar) a note was derived from |
 | `expires`, `scrubVersion` | journal expiry and scrubber version stamp |
 
 ### Folder and status semantics
@@ -270,13 +283,13 @@ separate.
 | `_inbox/_rejected/`, `_inbox/_applied/` | `inbox`, hidden by default |
 | `journal/` | `journal` |
 | `_raw/` | `raw` |
-| `_archive/`, `journal/_archive/` | `archive`, hidden by default |
+| `_archive/`, `journal/_archive/<principal-id>/` | `archive`, hidden by default |
 | `references/` | `reference` |
 | everything else | `curated` |
 
 - A note with no `status` outside `_inbox/`, `journal/`, `_raw/`, and
   `_archive/` is treated as `accepted`. Moving a file out of `_inbox/` in
-  Obsidian makes it curated regardless of its `status` field (Phase 7); a note
+  Obsidian makes it curated regardless of its `status` field (Phase 8); a note
   in `_inbox/` is inbox-tier regardless of a `status: accepted` it may claim.
 - `rejected`, `superseded`, and `archived` hide a note by default wherever it
   lives; `stale` demotes it (tier T7); an unknown value is tier T8 and is never
@@ -284,7 +297,7 @@ separate.
 - The tier table lives in Phase 4 and `docs/RANKING.md`.
 
 `sources` entries and any citation field use the citation grammar defined in
-Phase 4 (`src/cite/`).
+Phase 3 (`src/cite/`).
 
 ### Stack
 
@@ -346,8 +359,8 @@ spec2code docs/e3d-brain-spec.md 9 --provider claude
 ```
 
 Intended pause points for human review: after Phase 1 (safe-path API), after
-Phase 3 (identity and revision rules), after Phase 6 (a usable audited
-read-only brain), and after Phase 8 (the human-principal product).
+Phase 3 (identity, revision, and citation rules), after Phase 6 (a usable
+audited read-only brain), and after Phase 8 (the human-principal product).
 
 ## Phase 1 - Scaffold, Config, and Safe Paths
 
@@ -400,8 +413,13 @@ read-only brain), and after Phase 8 (the human-principal product).
   segment); `principal.type` is `human` or `agent`; `mode` is one of `inbox`,
   `journal`, `read-only`. `mode: journal` requires `principal.type: agent`.
   Invalid values fail config load (I10).
-- State directory created `0700`; any file the tool creates is `0600`.
-- `ebrain doctor` reports: platform (OS and arch), Node version, whether the vault filesystem is case-sensitive, FTS5 availability, vault path exists
+- State directory created `0700`; any file the tool creates is `0600`. Modes
+  are set with explicit `chmod`/open modes, never left to the umask.
+- The config file decides mode and principal, so it is checked at load: it
+  must be owned by the current user and not group- or world-writable, else
+  load fails.
+- `ebrain doctor` reports: platform (OS and arch), Node version, whether the vault filesystem is case-sensitive (probed with a temp file in the
+  state dir, never written into the vault), FTS5 availability, vault path exists
   and is readable, state dir permissions, and the string `network: disabled`
   unless `allowedHosts` is non-empty.
 - Create `docs/SECURITY.md` listing invariants I1-I13 verbatim and
@@ -434,7 +452,8 @@ read-only brain), and after Phase 8 (the human-principal product).
 ### Requirements
 
 - Vault scanner: walk the vault via `safe-path`, include `*.md`, skip
-  `.obsidian/`, `.git/`, `.trash/`, and dot-directories. Do not follow
+  `.obsidian/`, `.git/`, `.trash/`, dot-directories, and dot-files (these
+  include the writers' temporary files). Do not follow
   symlinks. Never write to the vault.
 - Parser: extract frontmatter (YAML), title (frontmatter `title` or first H1
   or filename), tags (frontmatter and inline `#tag`), headings, `[[wikilinks]]`
@@ -443,15 +462,17 @@ read-only brain), and after Phase 8 (the human-principal product).
 - Chunking: split notes by heading; keep fenced code blocks intact; target a
   maximum chunk size (default 1,500 characters) with sentence-aware splitting
   for long sections. Each chunk records `note_path`, `heading_path`, ordinal.
-- Index (SQLite, `<stateDir>/index.db`, WAL mode, `busy_timeout` set): tables
+- Index (SQLite, `<stateDir>/index.db`, WAL mode, `busy_timeout` set; the state dir must be on a local filesystem,
+  not NFS or EFS, which `docs/SETUP.md` states): tables
   for notes, chunks, links, tags; an FTS5 virtual table over chunk text.
-  Content hash per file so `ebrain reindex` is incremental; `ebrain reindex
+  Per-file stat key (size, `mtime_ns`, inode, `ctime_ns`) plus content hash
+  so `ebrain reindex` is incremental; `ebrain reindex
   --full` rebuilds from scratch.
-- **Index freshness.** Expose `refreshIndex()` (stat-based: size and mtime
-  first, content hash only when those changed) that is cheap enough to call
+- **Index freshness.** Expose `refreshIndex()` (stat-based: the stat key above
+  first, content hash only when it changed) that is cheap enough to call
   before every read and after every MCP write. `ebrain reindex` is the explicit
-  full-fidelity command; `refreshIndex()` is what the MCP server (Phase 5) and
-  the writers (Phases 7 and 9) call so that new captures and journal entries
+  full-fidelity command; `refreshIndex()` is what the MCP server (Phase 6) and
+  the writers (Phases 8 and 9) call so that new captures and journal entries
   are searchable immediately. The CLI and any number of MCP processes may use
   the same `index.db` concurrently (WAL plus busy timeout); a test runs a
   reindex while a second process queries. A watcher is out of scope.
@@ -468,7 +489,8 @@ read-only brain), and after Phase 8 (the human-principal product).
   `reference`) from its path per "Folder and status semantics". Invalid dates
   and unknown statuses are counted, never fatal (I10). Unknown frontmatter keys
   are kept in the index as an opaque JSON blob and never dropped.
-- Deterministic ordering for all listings (I11).
+- Deterministic ordering for all listings (I11): paths sort bytewise on their
+  NFC-normalized UTF-8 form (never locale-dependent).
 - `ebrain index dump` prints a canonical text dump of index contents
   (excluding provisional ids and rename history, see Phase 3) for equality
   tests.
@@ -492,7 +514,7 @@ read-only brain), and after Phase 8 (the human-principal product).
   the test records the platform and the dump is compared across platforms).
 - `bash tests/phase02.sh` passes.
 
-## Phase 3 - Note Identity, Revisions, and Citation Edges
+## Phase 3 - Note Identity, Revisions, Citation Grammar, and Edges
 
 <!-- runner:model=high -->
 <!-- runner:read=src/index -->
@@ -516,7 +538,7 @@ read-only brain), and after Phase 8 (the human-principal product).
 - **Revision normalization.** `rev` is the first 16 hex characters of the
   SHA-256 of the whole file (frontmatter plus body) after normalization: decode
   as UTF-8, strip a leading BOM, convert CRLF and CR to LF, and nothing else.
-  `rev` is also computed per chunk. Any byte change that survives normalization
+  A separate `chunk_rev` (same procedure over the chunk text) is computed per chunk; `rev` always means the note revision. Any byte change that survives normalization
   (including a frontmatter edit such as `status: accepted` or an added `id`)
   changes `rev`. Keep `note_revisions(id, rev, first_seen)` (hashes only, never
   content).
@@ -529,6 +551,16 @@ read-only brain), and after Phase 8 (the human-principal product).
   ids with `provisional: true` so callers can tell. `ebrain index dump` omits
   provisional ids and rename history, so that dump equality (I11) holds across
   full rebuilds.
+- **Citation grammar (`src/cite/`).** Pure functions `parseCitation`,
+  `formatCitation`, and `checkNoteCitation(cite) -> fresh|stale|missing`.
+  Grammar: `note:<id>@<rev>[#<heading>]`, `ref:<ref_id>/<chapter>/<ordinal>`
+  (book passages, added in Phase 11), `thesis:<id>`, `outcome:<id>`,
+  `commit:<sha>`, `url:<https-url>`. `<id>` matches `[A-Za-z0-9_]+`; `<rev>` is
+  16 lowercase hex; `<heading>` and `<https-url>` are percent-encoded so that
+  `@`, `#`, whitespace, commas, and brackets cannot appear raw; `format` always
+  emits the canonical encoding and `parse(format(x))` round-trips. Citations are
+  never resolved over the network. Unit tests include malformed and hostile
+  inputs. Later phases and specs use this grammar wherever they say "citation".
 - **Citation edges.** Index note-to-note citations found in `sources` and
   `derived_from` (`note:<id>@<rev>`) in a `cites(from_id, to_id, to_rev)`
   table, so "which notes cite this note?" is answerable without scanning.
@@ -553,9 +585,12 @@ read-only brain), and after Phase 8 (the human-principal product).
   `ebrain doctor`; an unknown `status` is counted and indexed lowest-ranked.
 - Vault checksum is unchanged after indexing (the index never writes ids into
   notes).
+- Citation grammar tests: round-trip for all kinds, hostile and malformed
+  inputs rejected, headings containing `@`, `#`, spaces, and commas survive
+  round-trip.
 - `bash tests/phase03.sh` passes.
 
-## Phase 4 - Citation Grammar, Fencing, Ranking, Tool Registry, and Dispatch
+## Phase 4 - Fencing, Ranking, Tool Registry, and Dispatch
 
 <!-- runner:model=high -->
 <!-- runner:read=src/index -->
@@ -566,16 +601,6 @@ any tool exists.
 
 ### Requirements
 
-- **Citation grammar (`src/cite/`).** Pure functions `parseCitation`,
-  `formatCitation`, and `checkNoteCitation(cite) -> fresh|stale|missing`.
-  Grammar: `note:<id>@<rev>[#<heading>]`, `ref:<ref_id>/<chapter>/<ordinal>`
-  (book passages, added in Phase 11), `thesis:<id>`, `outcome:<id>`,
-  `commit:<sha>`, `url:<https-url>`. `<id>` matches `[A-Za-z0-9_]+`; `<rev>` is
-  16 lowercase hex; `<heading>` and `<https-url>` are percent-encoded so that
-  `@`, `#`, whitespace, commas, and brackets cannot appear raw; `format` always
-  emits the canonical encoding and `parse(format(x))` round-trips. Citations are
-  never resolved over the network. Unit tests include malformed and hostile
-  inputs. Later phases and specs use this grammar wherever they say "citation".
 - **Fence (`src/mcp/fence.ts`).** The wrapper for all text returned to the model
   per I6, with its own unit tests (a note whose body contains runs of backticks
   of any length cannot terminate the fence; the label states reference data,
@@ -587,7 +612,7 @@ any tool exists.
   | Tier | Contents | Registered |
   |---|---|---|
   | T1 curated | folder class `curated` and `reference`, status `accepted` (or absent), including accepted lessons | Phase 4 |
-  | T2 inbox | folder class `inbox`, status `proposed` | Phase 7 |
+  | T2 inbox | folder class `inbox`, status `proposed` | Phase 8 |
   | T3 cited journal lesson | journal, `kind: lesson`, at least one well-formed citation in `sources` | Phase 9 |
   | T4 uncited journal lesson | journal, `kind: lesson`, no well-formed citation | Phase 9 |
   | T5 other journal | other `journal` entries | Phase 9 |
@@ -595,10 +620,18 @@ any tool exists.
   | T7 stale | status `stale`, in any folder class (ordered after T6) | Phase 4 |
   | T8 unknown | unknown `status` value | Phase 4 |
 
-  Notes with status `rejected`, `superseded`, or `archived`, and everything
+  The tier is a **total function** `effectiveTier(folder_class, status)`,
+  evaluated in this order: (1) status `rejected`, `superseded`, or
+  `archived`, or folder class `archive`: hidden by default (not in the table);
+  (2) unknown status: T8; (3) status `stale`: T7; (4) otherwise by folder
+  class: `curated`/`reference` T1, `inbox` T2, `journal` T3 to T5, `raw` T6.
+  A note moved out of `_inbox/` by hand is `curated` and therefore T1
+  whatever its `status` says (including `proposed`); the T1 row's status
+  column is descriptive, the function above is normative. Notes with status
+  `rejected`, `superseded`, or `archived`, and everything
   under `_archive/`, `_inbox/_rejected/`, `_inbox/_applied/`, and
   `journal/_archive/`, are hidden by default and are not in the table; filters
-  in Phase 5 reveal them. Reference books (`scope: refs`) are ordered among
+  in Phase 6 reveal them. Reference books (`scope: refs`) are ordered among
   themselves by the same function and always come after note tiers under
   `scope: all`. Within a tier: BM25 relevance (and vector via RRF when Phase 12
   is on), quantized to 1e-6, then deterministic tie-break (path, ordinal).
@@ -615,16 +648,13 @@ any tool exists.
 - **Dispatch (`src/mcp/dispatch.ts`).** Every MCP tool call, in every mode,
   goes through one function that validates arguments against the tool's schema,
   checks that the tool is registered for the instance's mode, calls the tool,
-  and passes the result through the fence and size cap. Phase 6 adds the audit
+  and passes the result through the fence and size cap. Phase 5 adds the audit
   line in this function. A scan test asserts that no tool handler is registered
   with the server except through `dispatch`.
 - `docs/RANKING.md` documents the table above and the ordering rules.
 
 ### Acceptance Criteria
 
-- Citation grammar tests: round-trip for all kinds, hostile and malformed
-  inputs rejected, headings containing `@`, `#`, spaces, and commas survive
-  round-trip.
 - Fence tests: backtick runs of every length (including 0 and 100) cannot close
   the fence; the label is present.
 - `rank.ts` is the only module that orders results (scan test); the tier table
@@ -634,18 +664,73 @@ any tool exists.
 - A scan test shows tool handlers can only be registered through `dispatch`.
 - `bash tests/phase04.sh` passes.
 
-## Phase 5 - MCP Server (stdio) with Read Tools
+## Phase 5 - Principal Enforcement and Audit Log (All Modes)
+
+<!-- runner:model=high -->
+<!-- runner:read=src/mcp -->
+<!-- runner:verify=bash tests/phase05.sh -->
+
+Depends on Phases 1-4 (it lives in `dispatch`, built in Phase 4, so it exists
+before the first runnable MCP server in Phase 6). Applies to every mode, including human `inbox` instances
+and `read-only` instances; it is not agent-specific.
+
+### Requirements
+
+- **Principal enforcement in tools:** `author` and `principal` are never
+  accepted as tool arguments (the schema validator rejects them as unknown
+  keys); they come from config only.
+- **Audit log:** every MCP `tools/call` request in every mode appends exactly
+  one JSON line to `<stateDir>/audit.jsonl`, written from `dispatch` (testable in this phase with a fake registered tool; the
+  real tools arrive in Phase 6):
+  `{ts, principal, mode, tool, args_summary, result_count, bytes_returned, outcome, recall_id, returned}`
+  where `recall_id` is the Phase 6 result-set id (absent until the tools exist) and `returned` is the list of
+  `{id, rev}` for notes returned (ids and revisions only, never content).
+  Rejected, invalid, and errored calls are logged too (`outcome` says which);
+  `initialize` and `tools/list` are not tool calls and are not logged.
+  `args_summary` contains paths, ids, and counts only: never note bodies, never
+  query text, never credentials. The file is opened append-only (`O_APPEND`),
+  `0600`; the server never truncates or rewrites it. When the file exceeds
+  `audit.maxSegmentMB` (default 50) the server starts a new segment (the
+  rotation decision is taken under a short-lived cross-process lockfile,
+  `<stateDir>/locks/audit.lock`, using the same lock helper as Phase 9)
+  (`audit.jsonl.1`, `.2`, ...), leaving earlier segments untouched; readers
+  (`ebrain audit tail|stats` and derived rollups) read all segments in
+  numeric order. An owner-run `ebrain audit prune --older-than <days>` may
+  delete whole old segments only. Several MCP processes may append to the same
+  log; each line is written with a single `write` call and is capped in size
+  (the `returned` list is truncated with a `returned_truncated: true` marker
+  past the cap).
+- Strict-scrub rejections (Phase 7) and limit rejections (Phase 9) are logged
+  here by detector or limit type only.
+- `docs/SETUP.md` gains an "Auditing" section.
+
+### Acceptance Criteria
+
+- Every call through `dispatch` for a fake tool in all three modes produces
+  exactly one audit line (including one rejected for bad arguments); lines never contain fixture secrets, query
+  text, or note bodies; read-tool lines carry the call's `recall_id` and the
+  returned `{id, rev}` list; the file is not truncated across server restarts.
+- A call passing `author` or `principal` is rejected by schema and still
+  audited.
+- Segment rotation: past the size threshold a new segment starts and `audit
+  tail` and `audit stats` read both in order; `audit prune` deletes only whole
+  old segments.
+- Two concurrent processes appending past the segment threshold produce no
+  torn lines and exactly one new segment.
+- `bash tests/phase05.sh` passes.
+
+## Phase 6 - MCP Server (stdio) with Read Tools
 
 <!-- runner:model=high -->
 <!-- runner:read=src/index -->
 <!-- runner:read=src/mcp -->
-<!-- runner:verify=bash tests/phase05.sh -->
+<!-- runner:verify=bash tests/phase06.sh -->
 
 ### Requirements
 
 - `ebrain mcp` starts an MCP server over **stdio** using the official SDK. It
   exposes exactly these tools in this phase (read tools are available in every
-  mode; write tools are added by Phases 7 and 9 according to mode). Every
+  mode; write tools are added by Phases 8 and 9 according to mode). Every
   handler is registered through `dispatch` (Phase 4) and calls `refreshIndex()`
   before reading.
 
@@ -664,10 +749,13 @@ any tool exists.
   `citation` (`note:<id>@<rev>[#heading]`). Every `search`, `related`, and
   `list_notes` response also includes a `recall_id` (ULID) identifying that
   result set.
-- **Filters.** `as_of` (ISO date): results exclude notes whose
-  `valid_until < as_of` or `valid_from > as_of`, and exclude
-  `superseded`/`archived` notes whose supersession/archival date is
-  `<= as_of`. Default `as_of` is now. `status` overrides the default
+- **Filters.** `as_of` (ISO date) evaluates **lifecycle at that time**:
+  results exclude notes whose `valid_until < as_of` or `valid_from > as_of`;
+  a `superseded` or `archived` note is visible at `as_of` if its
+  `superseded_at`/`archived_at` is later than `as_of` (the status-based
+  default hiding does not apply when `as_of` is given) and hidden otherwise.
+  Without `as_of`, `superseded`/`archived` notes are hidden unless the include
+  flags are set. Default `as_of` is now. `status` overrides the default
   visibility for the listed statuses. `include_expired` is added by Phase 9.
 - Every read tool accepts optional `max_chars` and `format: "full"|"compact"`
   per I6; `max_chars` can only lower the configured ceiling
@@ -681,6 +769,26 @@ any tool exists.
   `advanced: true` flag is set.
 - Server writes logs to stderr only (stdout is the protocol channel) and never
   logs note contents.
+- **Packaging (required, first usable product):**
+  - `ebrain init` interactively (or via flags) writes `config.json`, creates the
+    state dir with correct modes, creates `_inbox/`, `_raw/`, `references/` (and
+    `journal/<principal-id>/` when the mode is `journal`) in the vault if
+    missing, and prints the Claude Code / Claude Desktop MCP
+    snippets with absolute paths.
+  - `docs/SETUP.md` covers install for one person end to end, plus a short
+    section "Several people, separate brains": each person installs
+    independently with their own vault and state dir; no shared server; how to
+    keep vaults in sync with their own tool (Obsidian Sync, git, iCloud) and why
+    the state dir (index DB) must **not** be synced. It also has a "Running on a
+    Linux server" section: build toolchain prerequisites (`build-essential`,
+    `python3`, `make`) for `npm run build:native`, Node plus `npm ci
+    --ignore-scripts`, a dedicated OS user, state dir `0700` on a local
+    filesystem (not NFS/EFS), the vault synced via git, and a note that
+    Obsidian is not installed on servers.
+  - A `ebrain doctor --strict` mode that fails if: network is enabled with
+    non-loopback hosts, state dir permissions are loose, the vault contains a
+    symlink escaping the root, or (once Phase 13 exists) auto-hooks are
+    installed without `captureCheckpoints` being deliberate.
 - Provide `docs/SETUP.md` snippets for Claude Code (`claude mcp add ...`) and
   Claude Desktop config using an **absolute path** to the installed `ebrain`
   entry point (absolute node binary plus absolute script path), and a warning:
@@ -691,7 +799,7 @@ any tool exists.
 ### Acceptance Criteria
 
 - An integration test spawns `ebrain mcp`, performs the MCP initialize
-  handshake, lists tools (matching `expectedTools(<mode>, 5)` from the registry
+  handshake, lists tools (matching `expectedTools(<mode>, 6)` from the registry
   fixture for each of the three modes), and exercises each tool against the
   fixture vault.
 - `read_note` with `../../etc/passwd`, an absolute path, and the escaping
@@ -709,125 +817,18 @@ any tool exists.
 - A note added to the vault while the server is running is found by the next
   `search` without a manual reindex.
 - stdout contains only protocol frames during a full session (asserted).
-- `bash tests/phase05.sh` passes.
-
-## Phase 6 - Principal Enforcement and Audit Log (All Modes)
-
-<!-- runner:model=high -->
-<!-- runner:read=src/mcp -->
-<!-- runner:verify=bash tests/phase06.sh -->
-
-Depends on Phases 1-5. Applies to every mode, including human `inbox` instances
-and `read-only` instances; it is not agent-specific.
-
-### Requirements
-
-- **Principal enforcement in tools:** `author` and `principal` are never
-  accepted as tool arguments (the schema validator rejects them as unknown
-  keys); they come from config only.
-- **Audit log:** every MCP `tools/call` request in every mode appends exactly
-  one JSON line to `<stateDir>/audit.jsonl`, written from `dispatch`:
-  `{ts, principal, mode, tool, args_summary, result_count, bytes_returned, outcome, recall_id, returned}`
-  where `recall_id` is the Phase 5 result-set id and `returned` is the list of
-  `{id, rev}` for notes returned (ids and revisions only, never content).
-  Rejected, invalid, and errored calls are logged too (`outcome` says which);
-  `initialize` and `tools/list` are not tool calls and are not logged.
-  `args_summary` contains paths, ids, and counts only: never note bodies, never
-  query text, never credentials. The file is opened append-only (`O_APPEND`),
-  `0600`; the server never truncates or rewrites it. When the file exceeds
-  `audit.maxSegmentMB` (default 50) the server starts a new segment
-  (`audit.jsonl.1`, `.2`, ...), leaving earlier segments untouched; readers
-  (`ebrain audit tail|stats` and derived rollups) read all segments in
-  numeric order. An owner-run `ebrain audit prune --older-than <days>` may
-  delete whole old segments only. Several MCP processes may append to the same
-  log; each line is written with a single `write` call and is capped in size
-  (the `returned` list is truncated with a `returned_truncated: true` marker
-  past the cap).
-- Strict-scrub rejections (Phase 8) and limit rejections (Phase 9) are logged
-  here by detector or limit type only.
-- `docs/SETUP.md` gains an "Auditing" section.
-
-### Acceptance Criteria
-
-- Every tool call in all three modes produces exactly one audit line (including
-  one rejected for bad arguments); lines never contain fixture secrets, query
-  text, or note bodies; read-tool lines carry the call's `recall_id` and the
-  returned `{id, rev}` list; the file is not truncated across server restarts.
-- A call passing `author` or `principal` is rejected by schema and still
-  audited.
-- Segment rotation: past the size threshold a new segment starts and `audit
-  tail` and `audit stats` read both in order; `audit prune` deletes only whole
-  old segments.
-- Two instances with different principals and state dirs cannot read each
-  other's audit logs or vaults (two temp vaults and state dirs).
+- With the real tools, every `tools/call` in all three modes yields exactly
+  one audit line carrying the call's `recall_id` and returned `{id, rev}`
+  list, and no line contains query text or note bodies.
+- `ebrain init` on an empty temp dir yields a working setup that passes
+  `ebrain doctor --strict`.
 - `bash tests/phase06.sh` passes.
 
-## Phase 7 - Inbox: Capture and Human Review Gate
-
-<!-- runner:model=high -->
-<!-- runner:read=src/mcp -->
-<!-- runner:verify=bash tests/phase07.sh -->
-
-### Requirements
-
-- Add MCP tools, registered **only when `mode` is `inbox`** (they do not exist
-  in `journal` or `read-only` mode; asserted by a tool-list test per mode):
-  - `capture({ title, body, kind?, sources? })` -> creates
-    `_inbox/<yyyymmdd-hhmmss>-<slug>.md` with frontmatter
-    `status: proposed`, `kind` (`fact|decision|preference|idea|lesson|reference`),
-    `created`, `origin: mcp`, `author` (the configured `principal.id`), and
-    `sources` (list of source identifiers). The body passes through the scrubber (Phase 8 adds the real scrubber; in
-    this phase call a `scrub()` stub that is wired in and returns text
-    unchanged, with a test that the call site exists). Atomic create-only write (temp file, then `link` to the final name or `O_EXCL`; never `rename` over an existing name), mode `0600`, followed by `refreshIndex()`.
-  - `list_inbox({ limit? })` -> proposed notes with citations; fenced per I6.
-- **I2 enforcement:** the inbox writer takes only a validated slug and is
-  structurally unable to produce a path outside `_inbox/`. Slugs are
-  sanitized, length-limited, and de-duplicated by suffix. Existing files are
-  never overwritten.
-- CLI (owner-only, not MCP):
-  - `ebrain inbox list`
-  - `ebrain inbox show <id>`
-  - `ebrain inbox accept <id> [--to <folder>] [--edit]` (`<id>` is the note id;
-    default folder `notes/`) -> moves the note to the destination folder, sets `status: accepted`, adds `accepted: <timestamp>`. `accept` and `reject` rewrite only a note the
-    model itself proposed, so they are exempt from the undo store (the
-    cognition spec's Phase 1 covers rewrites of curated notes). Accepting
-    changes the note's `rev`, so citations pinned to the proposed rev become
-    `stale` by design.
-  - `ebrain inbox reject <id> [--reason ...]` -> moves to `_inbox/_rejected/`
-    (kept, not deleted) with `status: rejected`.
-- Acceptance by moving a file out of `_inbox/` manually in Obsidian is also
-  valid: the next `reindex` treats any note outside `_inbox/` as permanent
-  regardless of its `status` field.
-- Inbox notes are searchable but ranked below permanent notes (tier T2 in
-  `rank.ts`, registered here; `_inbox/_rejected/` and `_inbox/_applied/` are
-  hidden from `list_inbox` and default search) and clearly labeled `proposed` in results so Claude
-  never presents them as established facts.
-- `_inbox/` exists in **every** vault regardless of mode. MCP write tools are
-  mode-gated (above), but owner-run CLI commands (for example the cognition
-  jobs) may create proposal files there in any mode.
-- Every note the inbox creates gets an `id` (ULID) and `schema: 1`; `accept`
-  preserves the `id` and sets `status: accepted`.
-
-### Acceptance Criteria
-
-- Static test: a scan of `src/mcp/` shows no filesystem write calls outside the
-  inbox writer module.
-- Test: attempt to `capture` with titles such as `../../x`, `.obsidian/app`,
-  a 10k-character title, and an existing slug; all stay inside `_inbox/`, never
-  overwrite, and fit length limits.
-- The MCP tool list in each mode matches `expectedTools(<mode>, 7)` from
-  `tests/fixtures/tools-by-mode.json` (updated here: `inbox` gains `capture` and `list_inbox`). There is no
-  accept/delete/move/overwrite tool in any mode (asserted).
-- Accept/reject CLI commands produce the specified file moves and frontmatter
-  changes and preserve the note `id`; vault files outside `_inbox/` are
-  unchanged by `capture`.
-- `bash tests/phase07.sh` passes.
-
-## Phase 8 - Secret and Sensitive-Data Scrubber
+## Phase 7 - Secret and Sensitive-Data Scrubber
 
 <!-- runner:model=high -->
 <!-- runner:read=src/inbox -->
-<!-- runner:verify=bash tests/phase08.sh -->
+<!-- runner:verify=bash tests/phase07.sh -->
 
 ### Requirements
 
@@ -855,11 +856,14 @@ and `read-only` instances; it is not agent-specific.
     well-formed citations (`thesis:`, `outcome:`, `commit:`, `note:`); a 64-hex
     string counts as a private key only within a short window of a key-context
     word (`private`, `secret`, `priv`, `seed`, `mnemonic`, `key=`).
-- `scrub.extraPatterns` from config adds user regexes (validated; reject
-  catastrophic-backtracking patterns via a length limit and a timeout guard).
-- Wire the scrubber into: `capture`, and expose `ebrain scrub <file|->` for
-  manual use. Remove the Phase 7 stub. Add a `scrubVersion` field to inbox
-  frontmatter.
+- `scrub.extraPatterns` from config adds user **literal strings** (case-
+  sensitive, length-limited, count-limited). Arbitrary user regexes are out of
+  scope for v1: synchronous JavaScript regexes cannot be interrupted, so a
+  timeout guard is not implementable without a worker or an RE2 dependency.
+- Expose `ebrain scrub <file|->` for manual use and export a `scrub` entry
+  point plus a `scrubVersion` constant. Writers (Phase 8 `capture`, Phase 9
+  journal, Phases 10 and 13) call it before persisting and stamp
+  `scrubVersion` into frontmatter.
 - Fail-safe: if scrubbing throws, the write is aborted (never write unscrubbed
   text).
 - **Strict mode for agent principals.** When `principal.type` is `agent`,
@@ -868,7 +872,7 @@ and `read-only` instances; it is not agent-specific.
   keys and tokens, JWTs, `Bearer` tokens, password assignments, and URLs with
   embedded credentials) cause the **entire write to be rejected** (error returned,
   nothing stored) instead of redacting-and-continuing, and the rejection is
-  recorded by detector type only (in the audit log, Phase 6). Public addresses (for example
+  recorded by detector type only (in the audit log, Phase 5; callers pass the rejection to `dispatch`). Public addresses (for example
   `0x` + 40 hex) are not secrets and are preserved. PII-class detectors (cards,
   SSN, IBAN, routing/account) and the high-entropy heuristic redact and
   continue even for agents.
@@ -884,13 +888,92 @@ and `read-only` instances; it is not agent-specific.
 - A BIP39 12-word mnemonic is redacted; a 12-word ordinary sentence is not.
 - Idempotent: `scrub(scrub(x)) == scrub(x)`.
 - A pathological input (1 MB of `a`) scrubs within a time bound (test timeout).
-- `capture` with a body containing a fake API key stores `[REDACTED:...]` in
-  the inbox file (human principal).
-- With `principal.type: agent`, a write containing a fake private key, a fake
-  BIP39 mnemonic, or a fake API key is rejected whole, stores nothing, and a
-  public `0x` address in an otherwise clean write is preserved.
+- In strict mode (`principal.type: agent`), `scrub` rejects a fake private
+  key, a fake BIP39 mnemonic, or a fake API key whole and returns a rejection
+  naming only the detector type; a public `0x` address in an otherwise clean
+  text is preserved. (End-to-end write tests are in Phases 8 and 9.)
+- `ebrain scrub` on a fixture file redacts fake secrets and prints finding
+  counts only.
+
 - Transaction hashes, git SHAs, ULIDs, and citation strings in agent journal
   text are preserved; a 64-hex string next to the word `private key` is not.
+- `bash tests/phase07.sh` passes.
+
+## Phase 8 - Inbox: Capture and Human Review Gate
+
+<!-- runner:model=high -->
+<!-- runner:read=src/mcp -->
+<!-- runner:verify=bash tests/phase08.sh -->
+
+### Requirements
+
+- Add MCP tools, registered **only when `mode` is `inbox`** (they do not exist
+  in `journal` or `read-only` mode; asserted by a tool-list test per mode):
+  - `capture({ title, body, kind?, sources? })` -> creates
+    `_inbox/<yyyymmdd-hhmmss>-<slug>.md` with frontmatter
+    `status: proposed`, `kind` (`fact|decision|preference|idea|lesson|reference`),
+    `created`, `origin: mcp`, `author` (the configured `principal.id`), and
+    `sources` (list of source identifiers). The body passes through the Phase 7 scrubber (strict rules when the
+    principal is an agent) before anything is written, and `scrubVersion` is
+    stamped into the frontmatter. Atomic create-only write (temp file, then `link` to the final name or `O_EXCL`; never `rename` over an existing name), mode `0600`, followed by `refreshIndex()`.
+  - `list_inbox({ limit? })` -> proposed notes with citations; fenced per I6.
+- **I2 enforcement:** the inbox writer takes only a validated slug and is
+  structurally unable to produce a path outside `_inbox/`. Slugs are
+  sanitized, length-limited, and de-duplicated by suffix. Existing files are
+  never overwritten.
+- CLI (owner-only, not MCP):
+  - `ebrain inbox list`
+  - `ebrain inbox show <id>`
+  - `ebrain inbox accept <id> [--to <folder>] [--edit]` (`<id>` is the note id;
+        default folder `notes/`) -> moves the note to the destination folder, sets `status: accepted`, adds `accepted: <timestamp>`.
+    Destination rules: `--to` is resolved through `safe-path` and must be
+    inside the vault; it may not be (or be under) `_inbox/`, `journal/`,
+    `_raw/`, `_archive/`, or a dot-directory. The destination file is created
+    with `createExclusive` (never overwrites; on a name collision the slug gets
+    a numeric suffix). Crash ordering: write the destination first, then
+    unlink the source; if both exist after a crash, re-running `accept` (same
+    id) completes by unlinking the source, and `ebrain doctor` reports the
+    duplicate id until then. `accept` and `reject` rewrite only a note the
+    model itself proposed, so they are exempt from the undo store (the
+    cognition spec's Phase 1 covers rewrites of curated notes). Accepting
+    changes the note's `rev`, so citations pinned to the proposed rev become
+    `stale` by design.
+  - `ebrain inbox reject <id> [--reason ...]` -> moves to `_inbox/_rejected/`
+    (kept, not deleted) with `status: rejected`.
+- Acceptance by moving a file out of `_inbox/` manually in Obsidian is also
+  valid: the next `reindex` treats any note outside `_inbox/` as permanent
+  regardless of its `status` field.
+- Inbox notes are searchable but ranked below permanent notes (tier T2 in
+  `rank.ts`, registered here; `_inbox/_rejected/` and `_inbox/_applied/` are
+  hidden from `list_inbox` and default search) and clearly labeled `proposed` in results so Claude
+  never presents them as established facts.
+- `_inbox/` exists in **every** vault regardless of mode. MCP write tools are
+  mode-gated (above), but owner-run CLI commands (for example the cognition
+  jobs) may create proposal files there in any mode.
+- Every note the inbox creates gets an `id` (ULID) and `schema: 1`; `accept`
+  preserves the `id` and sets `status: accepted`.
+
+### Acceptance Criteria
+
+- Static test: a scan of `src/mcp/` shows no filesystem write calls outside the
+  inbox writer module.
+- Test: attempt to `capture` with titles such as `../../x`, `.obsidian/app`,
+  a 10k-character title, and an existing slug; all stay inside `_inbox/`, never
+  overwrite, and fit length limits.
+- The MCP tool list in each mode matches `expectedTools(<mode>, 8)` from
+  `tests/fixtures/tools-by-mode.json` (updated here: `inbox` gains `capture` and `list_inbox`). There is no
+  accept/delete/move/overwrite tool in any mode (asserted).
+- Accept/reject CLI commands produce the specified file moves and frontmatter
+  changes and preserve the note `id`; vault files outside `_inbox/` are
+  unchanged by `capture`.
+- `accept --to` with `_inbox/`, `journal/x`, `../x`, and an existing
+  destination name is refused or suffixed per the rules; a simulated crash
+  between destination write and source unlink is recovered by re-running
+  `accept`.
+- `capture` with a body containing a fake API key stores `[REDACTED:...]` in
+  the inbox file (human principal); with `principal.type: agent` (inbox mode)
+  a fake private key, mnemonic, or API key rejects the whole `capture` and
+  stores nothing.
 - `bash tests/phase08.sh` passes.
 
 ## Phase 9 - Agent Principals: Journal Mode and Workspace Import
@@ -900,8 +983,8 @@ and `read-only` instances; it is not agent-specific.
 <!-- runner:read=src/scrub -->
 <!-- runner:verify=bash tests/phase09.sh -->
 
-Depends on Phases 1-8 (strict agent scrubbing from Phase 8, audit from Phase
-6). Does not depend on Phase 15 (agents may use stdio, with each agent process
+Depends on Phases 1-8 (strict agent scrubbing from Phase 7, audit from Phase
+5). Does not depend on Phase 15 (agents may use stdio, with each agent process
 launching its own `ebrain mcp` with its own config).
 
 ### Requirements
@@ -921,13 +1004,17 @@ launching its own `ebrain mcp` with its own config).
     one file. After a successful create, call `refreshIndex()`.
   - `journal_list({ since?, kind?, limit?, max_chars?, format? })`.
   - `include_expired` is added to `search` and `list_notes` in this mode.
-  - Strict scrubbing per Phase 8 applies to every write.
+  - Strict scrubbing per Phase 7 applies to every write.
 - **Rate and size limits** (configurable, enforced server-side, rejecting not
   truncating): `journal.maxEntryChars` (default 4,000), `journal.maxEntriesPerHour`
   (default 60), `journal.maxTotalMB` (default 100). Counts and sizes are
   computed from the journal directory on the filesystem (timestamps in file
-  names and `stat` sizes), not from the index or the audit log, so they hold
-  with several MCP processes and with a stale index. Exceeding a limit returns
+  names and `stat` sizes), not from the index or the audit log. The whole
+  check-and-create sequence (limits, dedup, create) runs under one
+  cross-process lock, `<stateDir>/locks/journal-<principal-id>.lock` (an
+  `O_EXCL` lockfile holding pid and timestamp, with stale-lock recovery after
+  60 seconds and a bounded wait), so limits hold exactly with several MCP
+  processes and a stale index. Exceeding a limit returns
   a structured error and is audited.
 - **Dedup:** an entry whose normalized body hash matches an entry created by
   the same principal in the last 24h (found by reading the last 24h of that
@@ -938,13 +1025,15 @@ launching its own `ebrain mcp` with its own config).
   other journal entries), below curated notes and inbox notes. Results are
   labeled `agent-journal` and, where present, `untrusted_origin`. "Well-formed
   citation" means a `sources` entry of kind `thesis`, `outcome`, `commit`, or
-  `note` that parses with `parseCitation` (Phase 4). Citation *resolution*
+  `note` that parses with `parseCitation` (Phase 3). Citation *resolution*
   against external evidence is not verified by this ticket (see the cognition
   spec). Register the T3 to T5 rows in `rank.ts` with tests.
 - **Expiry:** `ebrain journal prune` (owner CLI, not MCP) lists/archives
-  entries past `expires` into `journal/_archive/`; it never deletes. Search
+  entries past `expires` into `journal/_archive/<principal-id>/` (keeping the `<yyyy>/` subpath, so
+  principals never mix and names never collide); it never deletes. Search
   ignores expired entries unless `include_expired` is set.
-- **Workspace import:** `ebrain import agent-workspace <dir> --principal <id>`
+- **Workspace import:** `ebrain import agent-workspace <dir> --principal <id>` (the id must equal the
+  configured principal, else refuse)
   imports an existing agent workspace (`MEMORY.md`, `memory/YYYY-MM-DD.md`,
   `GOALS.md`, and optionally `SOUL.md`/`TOOLS.md` as `kind: reference`) into
   `journal/<principal-id>/imported/`, scrubbed under strict agent rules
@@ -1218,7 +1307,7 @@ The cognition spec requires this phase (its `src/llm/` layer).
   (scan test: no provider code under `src/propose/`).
 - `bash tests/phase14.sh` passes.
 
-## Phase 15 - Optional Loopback HTTP Transport and Packaging for Multiple People
+## Phase 15 - Optional Loopback HTTP Transport
 
 <!-- runner:model=default -->
 <!-- runner:read=src/mcp -->
@@ -1226,24 +1315,6 @@ The cognition spec requires this phase (its `src/llm/` layer).
 
 ### Requirements
 
-- **Packaging (required):**
-  - `ebrain init` interactively (or via flags) writes `config.json`, creates the
-    state dir with correct modes, creates `_inbox/`, `_raw/`, `references/` (and
-    `journal/<principal-id>/` when the mode is `journal`) in the vault if
-    missing, and prints the Claude Code / Claude Desktop MCP
-    snippets with absolute paths.
-  - `docs/SETUP.md` covers install for one person end to end, plus a short
-    section "Several people, separate brains": each person installs
-    independently with their own vault and state dir; no shared server; how to
-    keep vaults in sync with their own tool (Obsidian Sync, git, iCloud) and why
-    the state dir (index DB) must **not** be synced. It also has a "Running on a
-    Linux server" section: Node plus `npm ci --ignore-scripts` and `npm run
-    build:native`, a dedicated OS user, state dir `0700`, the vault synced via
-    git, and a note that Obsidian is not installed on servers.
-  - A `ebrain doctor --strict` mode that fails if: network is enabled with
-    non-loopback hosts, state dir permissions are loose, the vault contains a
-    symlink escaping the root, or auto-hooks are installed without
-    `captureCheckpoints` being deliberate.
 - **Optional HTTP transport (off by default):** `ebrain mcp --http` (server code in `src/net/`) serves MCP
   over Streamable HTTP bound to `127.0.0.1` only, requiring a bearer token
   generated by `ebrain token create --principal <id>` (one token per
@@ -1257,8 +1328,6 @@ The cognition spec requires this phase (its `src/llm/` layer).
 
 ### Acceptance Criteria
 
-- `ebrain init` on an empty temp dir yields a working setup that passes
-  `ebrain doctor --strict`.
 - `ebrain mcp --http` refuses `0.0.0.0` and non-loopback hosts; rejects missing,
   wrong, and malformed tokens; accepts the valid token; the token is not stored
   in plaintext (grep test of the state dir).

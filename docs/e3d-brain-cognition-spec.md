@@ -49,28 +49,28 @@ memory-layer spec (`e3d-brain-spec.md`) and this ticket relies on it.
 
 | # | Gap in `e3d-brain-spec.md` | Why cognition needs it | Where |
 |---|---|---|---|
-| G1 | **No stable note identity.** Notes are addressed by path; paths change on accept (inbox -> folder), rename, and move in Obsidian. | Proposals and citations must survive moves. | Folded: memory Phases 3, 7, 9, 10 (`ebrain ids assign` with undo stays here, Phase 1) |
-| G2 | **No revision identity in tool results.** Index stores a content hash but tools don't expose it; citations rot silently when a note is edited. | Citations must pin a revision and be checkable for staleness; accept must detect "note changed since proposal". | Folded: memory Phases 3, 4 (`src/cite/`), 5 |
+| G1 | **No stable note identity.** Notes are addressed by path; paths change on accept (inbox -> folder), rename, and move in Obsidian. | Proposals and citations must survive moves. | Folded: memory Phases 3, 8, 9, 10 (`ebrain ids assign` with undo stays here, Phase 1) |
+| G2 | **No revision identity in tool results.** Index stores a content hash but tools don't expose it; citations rot silently when a note is edited. | Citations must pin a revision and be checkable for staleness; accept must detect "note changed since proposal". | Folded: memory Phases 3 (`src/cite/`), 6 |
 | G3 | **No lifecycle states beyond proposed/accepted/rejected/journal.** | `superseded`, `archived`, `stale`, `pinned` are needed, with defined ranking effects. | Folded: memory Note schema, Phases 2, 4 |
-| G4 | **No time semantics.** Only `created`. Imported conversations and human notes need *occurred* vs *recorded*; supersession needs `valid_from/valid_until` and `as_of` queries. | Temporal reasoning. | Folded: memory Note schema, Phases 2, 5, 10 |
-| G5 | **Ranking is scattered** across old memory Phases 3, 4, 7, 12 (now 4, 7, 9, 11) with no single scoring function. Cognition adds more tiers. | One documented, tested ranking function. | Folded: memory Phase 4 (`rank.ts`), I13 |
+| G4 | **No time semantics.** Only `created`. Imported conversations and human notes need *occurred* vs *recorded*; supersession needs `valid_from/valid_until` and `as_of` queries. | Temporal reasoning. | Folded: memory Note schema, Phases 2, 6, 10 |
+| G5 | **Ranking is scattered** across old memory Phases 3, 4, 7, 12 (now 4, 8, 9, 11) with no single scoring function. Cognition adds more tiers. | One documented, tested ranking function. | Folded: memory Phase 4 (`rank.ts`), I13 |
 | G6 | **Accept only moves a file.** Proposals include merge/supersede/archive, which *edit existing notes*. | Review queue with typed, previewable, undoable apply actions. | Phase 2 |
-| G7 | **Inbox is described as MCP-written; CLI-produced proposals are unspecified**, and `journal`/`read-only` instances have no sanctioned place for proposals. | Cognition runs from the owner CLI in *any* mode and writes to `_inbox/`. Mode governs MCP only. | Folded: memory I2 scope note, Phase 7 |
+| G7 | **Inbox is described as MCP-written; CLI-produced proposals are unspecified**, and `journal`/`read-only` instances have no sanctioned place for proposals. | Cognition runs from the owner CLI in *any* mode and writes to `_inbox/`. Mode governs MCP only. | Folded: memory I2 scope note, Phase 8 |
 | G8 | **LLM provider layer lives inside `propose` (memory-spec Phase 14).** | Shared `src/llm/` for all jobs; budgets; prompt versioning. | Folded: memory Phase 14 (`src/llm/`); budgets/prompt versioning extended in Phase 2 here |
 | G9 | **Determinism (I11) covers only the index.** LLM jobs aren't deterministic. | Run records + idempotent proposal ids instead. | Phase 2 |
 | G10 | **No rejection memory.** Rejected inbox items are kept but never used to suppress repeats. | Stop re-proposing what the owner rejected. | Phase 2 |
 | G11 | **No job concept / no rule on who may trigger expensive work.** | Jobs are owner-triggered CLI only; no MCP tool may start one. | Phase 2 |
 | G12 | **Citations are free strings; memory Phase 9 explicitly does not resolve them.** No external evidence concept. | `reflect` needs resolvable `thesis:`/`outcome:` evidence. | Phase 3 |
 | G13 | **No near-duplicate detection without embeddings** (embeddings are optional and off by default). | Deterministic dedup that works with BM25-only brains. | Phase 5 |
-| G14 | **Audit log records result *counts*, not which notes were returned**, and nothing links recall -> use -> outcome. | Recall stats (`forget`), usefulness feedback. | Folded: memory Phase 5 (`recall_id`), Phase 6 (audit `returned`) |
+| G14 | **Audit log records result *counts*, not which notes were returned**, and nothing links recall -> use -> outcome. | Recall stats (`forget`), usefulness feedback. | Folded: memory Phase 6 (`recall_id`), Phase 5 (audit `returned`) |
 | G15 | **I2 fences vault writes only; local state writes (usage events) are unspecified**, and there is no feedback tool. | Define a minimal, labeled state-dir event write allowed in every mode. | Folded: memory I2 scope note; `report_use` tool in Phase 8 here |
-| G16 | **Search results lack `id`, `rev`, `status`, `occurred`**, and have no `as_of`, `status`, or `include_superseded` filters. | Agents/humans must see lifecycle and time. | Folded: memory Phase 5 |
+| G16 | **Search results lack `id`, `rev`, `status`, `occurred`**, and have no `as_of`, `status`, or `include_superseded` filters. | Agents/humans must see lifecycle and time. | Folded: memory Phase 6 |
 | G17 | **No revision history**, so replay evaluation ("what would the brain have proposed in March?") is impossible unless the vault is in git. | Honest evaluation. | Phase 9 |
 | G18 | **No query log**, so "what do we ask about and not find?" can't be answered. | `gaps`. Opt-in, scrubbed, retention-limited. | Phase 8 |
 | G19 | **No cross-brain flow.** An agent's private-brain lesson may be worth proposing to a team brain; isolation forbids direct writes. | One-way, owner-run `publish` to another brain's `_inbox/`. | Out of scope; listed under Open Questions |
 | G20 | **No concurrency rules** between server writes, CLI jobs, and a human editing in Obsidian. | Revision-checked, atomic, backed-up apply. | Phase 2 |
 | G21 | **No note-to-note citation index**; "not cited by any accepted note" (forget) and impact checks (supersede) would need full scans. | Cheap "who cites this?" queries. | Folded: memory Phase 3 (`cites` table) |
-| G22 | **Audit log grows without bound** yet is "never truncated"; rollups depend on it. | Segment rotation; rollups read all segments. | Folded: memory Phase 6 |
+| G22 | **Audit log grows without bound** yet is "never truncated"; rollups depend on it. | Segment rotation; rollups read all segments. | Folded: memory Phase 5 |
 | G23 | **Every phase hardcoded its own expected MCP tool list**, which breaks as phases add tools (`read_ref_chunk`, `report_use`). | One tool-registry fixture per mode. | Folded: memory Phase 4 (`tools-by-mode.json`) |
 
 ## Goals
@@ -335,7 +335,7 @@ Fixes G12.
 - `ebrain evidence import <file>` copies/validates an export into the
   configured evidence directory (atomic); `ebrain evidence stats`.
 - Citation resolver: `resolveCitation(cite) -> resolved|unresolved|stale|
-  malformed` combining note citations (memory-layer Phase 4 citation grammar) and evidence citations.
+  malformed` combining note citations (memory-layer Phase 3 citation grammar) and evidence citations.
   Resolution status is cached per run, never persisted as truth.
 - Document (in `docs/SETUP.md`) how E3D exports thesis/outcome records to
   such a file (a stub `scripts/export-e3d-evidence.md` describes the fields;
@@ -496,7 +496,7 @@ Fixes G13.
 
 - Staleness signals (deterministic): age since last `occurred`/modified,
   `recall_count` and `last_recalled` (from the memory-layer audit `returned`
-  data (Phase 6), read across all audit segments and rolled up into a derived
+  data (Phase 5), read across all audit segments and rolled up into a derived
   `note_stats` table, rebuildable from the audit segments),
   superseded/archived status of linked notes, and journal `expires`.
 - Candidates: notes with no recall in `forget.windowDays` (default 180), older
