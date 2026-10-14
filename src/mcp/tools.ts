@@ -154,10 +154,25 @@ export interface Visibility {
   now: number;
 }
 
-/** Status a result reports: the frontmatter value, or `accepted` for a curated/reference note without one. */
-export function effectiveStatus(row: Pick<NoteRow, 'status' | 'folder_class'>): string | null {
+/**
+ * Status a result reports: the frontmatter value, or `accepted` for a
+ * curated/reference note without one. A visible note in `_inbox/` is a
+ * proposal whatever it claims (Phase 8): no status, or a claimed `accepted`,
+ * reports `proposed`.
+ */
+export function effectiveStatus(row: Pick<NoteRow, 'status' | 'folder_class'> & Partial<Pick<NoteRow, 'folder_hidden'>>): string | null {
+  if (row.folder_class === 'inbox' && row.folder_hidden !== 1 && (row.status === null || row.status === 'accepted')) return 'proposed';
   if (row.status !== null) return row.status;
   return row.folder_class === 'curated' || row.folder_class === 'reference' ? 'accepted' : null;
+}
+
+/** Header notice on any result list that contains inbox proposals (Phase 8). */
+export const PROPOSED_NOTICE =
+  'Results with folder_class "inbox" (status "proposed") are unreviewed proposals, not established facts; do not present them as such.';
+
+/** `{notice}` when any listed row lives in the inbox, else nothing. */
+function proposedNotice(rows: readonly Pick<NoteRow, 'folder_class'>[]): Record<string, unknown> {
+  return rows.some((r) => r.folder_class === 'inbox') ? { notice: PROPOSED_NOTICE } : {};
 }
 
 function sourcesOf(row: NoteRow): unknown[] {
@@ -257,7 +272,7 @@ export function noteFields(row: NoteRow, tier?: TierOrHidden): Record<string, un
   return out;
 }
 
-function rankItem<T extends { row: NoteRow; ordinal?: number; bm25?: number }>(x: T): T & RankItem {
+export function rankItem<T extends { row: NoteRow; ordinal?: number; bm25?: number }>(x: T): T & RankItem {
   const r = x.row;
   return {
     ...x,
@@ -449,7 +464,7 @@ function search(env: ReadToolEnv, args: Record<string, unknown>, maxChars: numbe
     const text = format === 'compact' ? item.hit.snippet : item.hit.text;
     return { fields, excerpt: excerptOf(text, format, SEARCH_EXCERPT_CHARS) };
   });
-  return listResponse('search', format, items, maxChars, { matched: candidates.length });
+  return listResponse('search', format, items, maxChars, { matched: candidates.length, ...proposedNotice(ranked.map((r) => r.item.row)) });
 }
 
 function readNote(env: ReadToolEnv, args: Record<string, unknown>, maxChars: number): ToolResult {
@@ -511,7 +526,7 @@ function listNotes(env: ReadToolEnv, args: Record<string, unknown>, maxChars: nu
     if (format === 'full') Object.assign(fields, { title: item.row.title, tags: tagMap.get(item.row.path) ?? [] });
     return { fields, excerpt: excerptOf(firstChunkText(db, item.row.path), format, LIST_EXCERPT_CHARS) };
   });
-  return listResponse('list_notes', format, items, maxChars, { matched: candidates.length });
+  return listResponse('list_notes', format, items, maxChars, { matched: candidates.length, ...proposedNotice(ranked.map((r) => r.item.row)) });
 }
 
 type Relation = 'backlink' | 'outgoing' | 'shared_tag';
@@ -550,7 +565,11 @@ function related(env: ReadToolEnv, args: Record<string, unknown>, maxChars: numb
     if (format === 'full') fields['title'] = item.row.title;
     return { fields };
   });
-  return listResponse('related', format, items, maxChars, { matched: byPath.size, note: citationFor(self) });
+  return listResponse('related', format, items, maxChars, {
+    matched: byPath.size,
+    note: citationFor(self),
+    ...proposedNotice(ranked.map((r) => r.item.row)),
+  });
 }
 
 /** Register the four read tools (every mode) into `registry`. */

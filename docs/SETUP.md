@@ -91,8 +91,10 @@ config file.
 
 ## MCP tools
 
-Read tools, available in every mode (write tools arrive with the inbox and
-journal phases):
+Read tools are available in every mode; `capture` and `list_inbox` exist only
+in `inbox` mode (in `journal` and `read-only` mode they are unknown tools).
+There is no MCP tool to accept, edit, move, delete, or overwrite anything in
+any mode.
 
 | Tool | Arguments |
 |---|---|
@@ -100,6 +102,8 @@ journal phases):
 | `read_note` | `path`, `max_chars?`, `format?` |
 | `list_notes` | `folder?`, `tag?`, `limit?` (default 50, max 200), `status?`, `include_superseded?`, `include_archived?`, `as_of?`, `max_chars?`, `format?` |
 | `related` | `path`, `limit?` (default 10, max 50), `max_chars?`, `format?`: backlinks, outgoing links, notes sharing tags |
+| `capture` (inbox mode) | `title`, `body`, `kind?` (`fact`, `decision`, `preference`, `idea` (default), `lesson`, `reference`), `sources?` (citations, at most 50): proposes a note in `_inbox/` (see Inbox) |
+| `list_inbox` (inbox mode) | `limit?` (default 50, max 200), `max_chars?`, `format?`: proposals waiting for review, with citations |
 
 - Every call refreshes the index first, so notes added or edited in the vault
   are found without a manual `reindex`.
@@ -107,8 +111,9 @@ journal phases):
   `omitted`, ...) followed by one fenced block of reference data: JSON Lines
   (one result per line) for lists, or the metadata line, a blank line, and the
   note text for `read_note`. Each result carries `id`, `provisional`, `rev`,
-  `status` (the note's status, or `accepted` for a curated or reference note
-  without one), `kind`, `occurred`, `folder_class`, `path`, and `citation`
+  `status` (the note's status, `accepted` for a curated or reference note
+  without one, `proposed` for an inbox note without one or claiming
+  `accepted`), `kind`, `occurred`, `folder_class`, `path`, and `citation`
   (`note:<id>@<rev>[#heading]`); search results add `heading_path` and an
   `excerpt`. `recall_id` (a ULID) identifies the result set and appears in the
   audit line.
@@ -223,6 +228,63 @@ notes.
 another network filesystem: several processes (the CLI and any number of MCP
 servers) share `index.db` through SQLite WAL mode, which needs working shared
 memory and POSIX locks.
+
+## Inbox (the review gate)
+
+Nothing a model proposes becomes curated memory until you accept it.
+
+- `capture` (MCP, `inbox` mode only) writes a new file
+  `_inbox/<yyyymmdd-hhmmss>-<slug>.md` (UTC time; mode `0600`) with
+  frontmatter `schema: 1`, `id` (a ULID), `title`, `status: proposed`, `kind`,
+  `created`, `origin: mcp`, `author` (your `principal.id`), `sources`, and
+  `scrubVersion`. Title, body, and sources go through the scrubber first: for
+  a `human` principal secrets are stored as `[REDACTED:<type>]`; for an
+  `agent` principal a credential (private key, seed phrase, API key, ...)
+  rejects the whole capture and nothing is stored. A source that would need
+  redacting is refused. The slug comes from the title (lowercase ASCII
+  letters, digits, and `-`, at most 60 characters), so a title can never
+  name a path; a name already taken gets `-2`, `-3`, ... and no file is ever
+  overwritten. The tool takes no path argument.
+- Proposals are searchable but rank below curated notes (tier T2, see
+  `docs/RANKING.md`), report `status: "proposed"` (a note inside `_inbox/` is a
+  proposal even if it claims `accepted`), and result headers carry a `notice`
+  that they are not established facts. `_inbox/_rejected/` and
+  `_inbox/_applied/` are hidden from `list_inbox` and default search.
+- Review from the command line (owner only; works in every mode):
+
+  ```bash
+  ebrain inbox list                         # id, created, kind, author, path, title
+  ebrain inbox show <id>
+  ebrain inbox accept <id> [--to <folder>] [--edit]
+  ebrain inbox reject <id> [--reason "why"]
+  ```
+
+  `accept` writes the note to `<folder>/<slug>.md` (default `notes/`; the
+  timestamp prefix is dropped; a taken name gets `-2`, ...) with
+  `status: accepted` and `accepted: <timestamp>`, keeping its `id` and every
+  other frontmatter key, then removes the inbox copy. `--to` must be a folder
+  inside the vault and may not be (or be under) `_inbox/`, `journal/`,
+  `_raw/`, `_archive/`, or a dot-directory, also after symlinks are resolved.
+  `--edit` then opens the note in `$VISUAL` or `$EDITOR`, which must be a
+  single program (absolute path or name, no arguments); it is started
+  without a shell. `reject` moves the note to `_inbox/_rejected/` (kept, not
+  deleted) with `status: rejected`, `rejected: <timestamp>`, and
+  `rejected_reason`. A note without an `id` (one you dropped into `_inbox/`
+  by hand) is addressed by the provisional id `inbox list` shows and gets a
+  ULID when accepted or rejected.
+- Accepting changes the note's `rev`, so citations pinned to the proposed
+  revision become `stale`, by design. Accept and reject only rewrite notes
+  the model proposed, so they keep no undo copy.
+- Crash safety: the destination is written first, then the inbox copy is
+  removed. If both exist after a crash, `ebrain doctor` reports the duplicate
+  id until you re-run the same `ebrain inbox accept <id>` (or `reject`),
+  which finishes by removing the inbox copy.
+- Accepting by hand is fine too: move the file out of `_inbox/` in Obsidian
+  and it is curated memory from the next index refresh, whatever its
+  `status` says.
+- `_inbox/` exists in every vault (`ebrain init` creates it; the inbox
+  commands recreate it if missing). Owner-run CLI jobs may write proposals
+  there in any mode; only the MCP tools are limited to `inbox` mode.
 
 ## Scrubbing
 

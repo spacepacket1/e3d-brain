@@ -16,7 +16,7 @@ import { ULID_RE } from '../src/mcp/ulid.js';
 import { resolveInState } from '../src/safe-path.js';
 import { materializeFixture, realTmpDir, repoRoot, rmrf } from './helpers.js';
 import { fencedBlock, header, McpProcess, results, type ToolResponse } from './mcp-client.js';
-import { expectedTools, TOOL_MODES, type ToolMode } from './tool-registry.js';
+import { checkToolsSincePhase, TOOL_MODES, type ToolMode } from './tool-registry.js';
 
 const PHASE = 6;
 const cli = () => path.join(repoRoot(), 'dist', 'src', 'cli', 'main.js');
@@ -78,14 +78,15 @@ after(() => {
 
 describe('ebrain mcp: tools in every mode, audit, stdout', () => {
   for (const mode of TOOL_MODES) {
-    it(`mode ${mode}: lists expectedTools(${mode}, ${PHASE}), runs each tool, one audit line per call`, async () => {
+    it(`mode ${mode}: lists the phase-${PHASE} tools, runs each tool, one audit line per call`, async () => {
       const inst = makeInstance(mode);
       const m = new McpProcess(inst.config);
       try {
         const init = await m.initialize();
         assert.equal(init.serverInfo.name, 'e3d-brain');
         const listed = await m.listTools();
-        assert.deepEqual([...listed].sort(), expectedTools(mode, PHASE));
+        // Later phases add tools (the exact list per phase is asserted in that phase's test).
+        assert.equal(checkToolsSincePhase(listed, mode, PHASE), undefined);
 
         const calls: [string, Record<string, unknown>][] = [
           ['search', { query: 'injectionmarker' }],
@@ -375,7 +376,7 @@ describe('ebrain init and doctor --strict', () => {
     const m = new McpProcess(cfg);
     try {
       await m.initialize();
-      assert.deepEqual([...(await m.listTools())].sort(), expectedTools('inbox', PHASE));
+      assert.equal(checkToolsSincePhase(await m.listTools(), 'inbox', PHASE), undefined);
       assert.deepEqual(paths(await m.call('search', { query: 'hello brain' })), ['first.md']);
     } finally {
       await m.close();

@@ -52,3 +52,17 @@ export function expectedTools(mode: ToolMode, upToPhase: number, entries: readon
     .map((e) => e.name)
     .sort();
 }
+
+/**
+ * For an earlier phase's tool-list test once later phases have added tools:
+ * `listed` includes every tool of phases 1..phase for `mode`, and anything
+ * else it lists is a later-phase registry tool of that mode. Returns a
+ * problem description, or undefined.
+ */
+export function checkToolsSincePhase(listed: readonly string[], mode: ToolMode, phase: number, entries: readonly ToolEntry[] = loadToolRegistry()): string | undefined {
+  const missing = expectedTools(mode, phase, entries).filter((n) => !listed.includes(n));
+  if (missing.length > 0) return `missing phase-${phase} tools: ${missing.join(', ')}`;
+  const later = new Set(entries.filter((e) => e.phase > phase && e.modes.includes(mode)).map((e) => e.name));
+  const stray = listed.filter((n) => !expectedTools(mode, phase, entries).includes(n) && !later.has(n));
+  return stray.length > 0 ? `tools not in the registry for ${mode}: ${stray.join(', ')}` : undefined;
+}

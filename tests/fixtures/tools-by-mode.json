@@ -2,5 +2,7 @@
   { "name": "search", "modes": ["inbox", "journal", "read-only"], "phase": 6 },
   { "name": "read_note", "modes": ["inbox", "journal", "read-only"], "phase": 6 },
   { "name": "list_notes", "modes": ["inbox", "journal", "read-only"], "phase": 6 },
-  { "name": "related", "modes": ["inbox", "journal", "read-only"], "phase": 6 }
+  { "name": "related", "modes": ["inbox", "journal", "read-only"], "phase": 6 },
+  { "name": "capture", "modes": ["inbox"], "phase": 8 },
+  { "name": "list_inbox", "modes": ["inbox"], "phase": 8 }
 ]

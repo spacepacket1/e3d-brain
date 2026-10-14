@@ -149,3 +149,34 @@ export function neighbours(db: Db, path: string): { backlinks: NoteRow[]; outgoi
   }
   return { backlinks, outgoing, sharedTags };
 }
+
+// ---- inbox review queries (Phase 8) ----
+
+/** What `ebrain inbox` needs to know about a note. */
+export interface ReviewRow {
+  path: string;
+  id: string;
+  fm_id: string | null;
+  provisional: number;
+  rev: string;
+  title: string;
+  folder_class: string;
+  folder_hidden: number;
+  status: string | null;
+  kind: string | null;
+  created: string | null;
+  author: string | null;
+  frontmatter: string;
+}
+
+const REVIEW_SELECT = `path, id, fm_id, provisional, rev, title, folder_class, folder_hidden, status, kind, created, author, frontmatter`;
+
+/** Every note whose effective id or frontmatter id is `id` (a crash between accept's two steps leaves two). */
+export function reviewRowsById(db: Db, id: string): ReviewRow[] {
+  return db.prepare(`SELECT ${REVIEW_SELECT} FROM notes WHERE id = ? OR fm_id = ?`).all(id, id) as ReviewRow[];
+}
+
+/** The review fields of one note. */
+export function reviewRowByPath(db: Db, path: string): ReviewRow | undefined {
+  return db.prepare(`SELECT ${REVIEW_SELECT} FROM notes WHERE path = ?`).get(path) as ReviewRow | undefined;
+}

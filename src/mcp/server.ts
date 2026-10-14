@@ -13,6 +13,7 @@ import { checkFts5 } from '../index/sqlite.js';
 import { ensureStateDir, type LoadedConfig } from '../config.js';
 import { VERSION } from '../version.js';
 import { attachToServer, listTools, ToolRegistry, type DispatchContext } from './dispatch.js';
+import { registerInboxTools } from './inbox-tools.js';
 import { registerReadTools } from './tools.js';
 
 export const SERVER_NAME = 'e3d-brain';
@@ -45,6 +46,8 @@ export async function runMcpServer(opts: McpServerOptions): Promise<void> {
 
   const registry = new ToolRegistry();
   registerReadTools({ vaultPath: config.vaultPath, index }, registry);
+  // capture and list_inbox exist in inbox mode only (Phase 8, I2).
+  if (config.mode === 'inbox') registerInboxTools({ vaultPath: config.vaultPath, index, extraPatterns: config.scrub.extraPatterns }, registry);
   const ctx: DispatchContext = {
     mode: config.mode,
     principal: { ...config.principal },

@@ -3,6 +3,7 @@
 
 import { runAudit } from './audit-commands.js';
 import { runDoctor } from './doctor.js';
+import { runInbox } from './inbox-commands.js';
 import { runIndexCommand, runReindex, type CommandResult } from './index-commands.js';
 import { runInit, terminalPrompt } from './init.js';
 import { runScrub } from './scrub-command.js';
@@ -24,6 +25,12 @@ commands:
   audit stats       summarize the audit log (segments, outcomes, tools)
   audit prune --older-than <days>
                     delete whole audit segments older than <days> (never the current one)
+  inbox list        list proposals waiting in _inbox/ (owner review; not available over MCP)
+  inbox show <id>   print a proposal
+  inbox accept <id> [--to <folder>] [--edit]
+                    move a proposal to <folder> (default notes/) with status: accepted
+  inbox reject <id> [--reason <text>]
+                    move a proposal to _inbox/_rejected/ with status: rejected
   scrub <file|-> [--strict] [--entropy-threshold <bits>]
                     print the text with secrets redacted; finding counts go to stderr
                     (--strict: agent rules, reject on any credential and exit 3)
@@ -94,6 +101,8 @@ export function main(argv: readonly string[]): number | Promise<number> {
       return emit(runAudit(rest));
     case 'scrub':
       return emit(runScrub(rest));
+    case 'inbox':
+      return emit(runInbox(rest));
     case 'init':
       return runInitCommand(rest);
     case 'mcp':

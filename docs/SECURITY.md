@@ -201,6 +201,26 @@ keys and invalid values are errors (I10).
   lines); base58 keys without a checksum (for example Solana) are caught only
   by the entropy heuristic; base64 of ordinary text may be redacted as
   `high-entropy`.
+- Inbox (Phase 8, I2): `capture` and `list_inbox` are registered only in
+  `inbox` mode. `capture` scrubs title, body, and sources before anything is
+  written and has no path argument: it passes a sanitized slug
+  (`[a-z0-9-]`, at most 60 characters) to `src/inbox/writer.ts`, which builds
+  the file name itself, checks that the target's parent is `<vault>/_inbox/`
+  (a real directory, not a symlink), and publishes with `createExclusive`
+  (suffixing on collision, never overwriting). A scan test fails if any file
+  in `src/mcp/` contains a filesystem write call or imports anything from
+  `src/inbox/` other than the writer and the pure note renderer. Accept and
+  reject (`src/inbox/review.ts`) are CLI only; `--to` goes through
+  `resolveInVault` and is refused for `_inbox/`, `journal/`, `_raw/`,
+  `_archive/`, and dot-directories, also after symlink resolution. Accept
+  writes the destination with `createExclusive` before unlinking the source,
+  so a crash can leave a duplicate (reported by `doctor`, finished by
+  re-running accept) but never lose the note.
+- `accept --edit` is the only process spawn so far (`src/exec/editor.ts`):
+  the owner's `$VISUAL`/`$EDITOR`, restricted to a single program name or
+  absolute path, spawned with an argument array and `shell: false`, with the
+  note path as its only argument. Residual: the editor is whatever program
+  the owner's environment names.
 - `ebrain doctor --strict` fails on non-loopback `allowedHosts`, any
   group/world-accessible entry under the state dir, and vault symlinks that
   escape the root.
