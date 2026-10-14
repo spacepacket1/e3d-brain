@@ -30,6 +30,7 @@ export interface Config {
   audit: { maxSegmentMB: number };
   journal: JournalConfig;
   refs: RefsConfig;
+  hooks: HooksConfig;
 }
 
 /** Optional local embeddings (Phase 12). Provider `none` (the default) means BM25 only and no network code runs. */
@@ -40,6 +41,18 @@ export interface EmbeddingsConfig {
   /** Ollama base URL: loopback, or a host listed in `network.allowedHosts`. */
   baseUrl: string;
   store: EmbeddingsStore;
+}
+
+/** Claude Code hooks (Phase 13). Read only from the user-level config file, never from a project. */
+export interface HooksConfig {
+  /** Vault folders (`notes/work`) or tags (`#project`) whose recent accepted notes go in the session brief. */
+  briefFolders: string[];
+  /** Optional user-written text placed in the session brief. */
+  focus: string;
+  /** `pre-compact` writes a checkpoint proposal only when this is exactly `true`. */
+  captureCheckpoints: boolean;
+  /** Transcripts are read only from files under this directory. */
+  claudeProjectsDir: string;
 }
 
 /** Reference-library output limits for `search` (Phase 11). */
@@ -87,6 +100,9 @@ export const DEFAULT_REFS: Readonly<RefsConfig> = { excerptChars: 400, maxHits: 
 /** Upper bounds for `refs.*`: excerpts and hits stay short so a book cannot be dumped through `search`. */
 export const MAX_REF_EXCERPT_CHARS = 1000;
 export const MAX_REF_HITS = 20;
+export const DEFAULT_CLAUDE_PROJECTS_DIR = '~/.claude/projects';
+export const MAX_HOOK_FOCUS_CHARS = 2000;
+export const MAX_BRIEF_FOLDERS = 32;
 export const DEFAULT_EMBEDDINGS_MODEL = 'nomic-embed-text';
 export const DEFAULT_EMBEDDINGS_URL = 'http://127.0.0.1:11434';
 export const PRINCIPAL_ID_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
@@ -185,7 +201,7 @@ function isInsideLexical(parent: string, child: string): boolean {
 export function parseConfig(raw: unknown, opts: { homeDir?: string } = {}): Config {
   const home = opts.homeDir ?? os.homedir();
   if (!isObject(raw)) throw new ConfigError('config must be a JSON object');
-  checkKeys(raw, ['vaultPath', 'stateDir', 'principal', 'mode', 'limits', 'network', 'scrub', 'embeddings', 'audit', 'journal', 'refs'], '');
+  checkKeys(raw, ['vaultPath', 'stateDir', 'principal', 'mode', 'limits', 'network', 'scrub', 'embeddings', 'audit', 'journal', 'refs', 'hooks'], '');
 
   const vaultPath = expandHome(requiredStr(raw, 'vaultPath', 'vaultPath'), 'vaultPath', home);
   const stateDir = expandHome(str(raw, 'stateDir', 'stateDir') ?? DEFAULT_STATE_DIR, 'stateDir', home);
@@ -273,6 +289,24 @@ export function parseConfig(raw: unknown, opts: { homeDir?: string } = {}): Conf
   };
   const refs: RefsConfig = { excerptChars: refsKey('excerptChars', MAX_REF_EXCERPT_CHARS), maxHits: refsKey('maxHits', MAX_REF_HITS) };
 
+  const hooksRaw = section(raw, 'hooks', ['briefFolders', 'focus', 'captureCheckpoints', 'claudeProjectsDir'], false);
+  const briefFolders = stringArray(hooksRaw, 'briefFolders', 'hooks.briefFolders');
+  if (briefFolders.length > MAX_BRIEF_FOLDERS) throw new ConfigError(`config key "hooks.briefFolders" has more than ${MAX_BRIEF_FOLDERS} entries`);
+  for (const entry of briefFolders) {
+    const name = entry.startsWith('#') ? entry.slice(1) : entry;
+    if (name === '' || name.length > 200 || /[\u0000-\u001f\u007f\\]/.test(name) || name.startsWith('/') || name.split('/').some((seg) => seg === '..' || seg === '.')) {
+      throw new ConfigError('config key "hooks.briefFolders" entries must be vault-relative folders or "#tag" names');
+    }
+  }
+  const focus = str(hooksRaw, 'focus', 'hooks.focus') ?? '';
+  if (focus.length > MAX_HOOK_FOCUS_CHARS || /[\u0000-\u0008\u000b-\u001f\u007f]/.test(focus)) {
+    throw new ConfigError(`config key "hooks.focus" must be text of at most ${MAX_HOOK_FOCUS_CHARS} characters without control characters`);
+  }
+  const capture = hooksRaw['captureCheckpoints'];
+  if (capture !== undefined && typeof capture !== 'boolean') throw new ConfigError('config key "hooks.captureCheckpoints" must be true or false');
+  const claudeProjectsDir = expandHome(str(hooksRaw, 'claudeProjectsDir', 'hooks.claudeProjectsDir') ?? DEFAULT_CLAUDE_PROJECTS_DIR, 'hooks.claudeProjectsDir', home);
+  const hooks: HooksConfig = { briefFolders, focus, captureCheckpoints: capture === true, claudeProjectsDir };
+
   return {
     vaultPath,
     stateDir,
@@ -285,6 +319,7 @@ export function parseConfig(raw: unknown, opts: { homeDir?: string } = {}): Conf
     audit: { maxSegmentMB },
     journal,
     refs,
+    hooks,
   };
 }
 

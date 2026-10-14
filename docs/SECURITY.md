@@ -256,6 +256,15 @@ keys and invalid values are errors (I10).
   archive notes hold whole scrubbed conversations, so heuristic scrubber
   misses (Phase 7 residuals) persist in the vault, and anything that syncs
   the vault carries them.
+- Hooks (Phase 13, I2, I5, I6): `session-start` is read-only and its brief is
+  fenced and capped. `pre-compact` writes only when `mode` is `inbox` and
+  `hooks.captureCheckpoints` is `true`, only through the inbox writer, and only
+  scrubbed user turns from a transcript under `hooks.claudeProjectsDir` (realpath
+  checked, symlinks refused). Hook settings are read only from the user-level
+  `config.json`; the hook JSON's `cwd` and project files are ignored. Hooks
+  fail open (exit 0). `install`/`remove` edit only entries ending in
+  `hook <event> --ebrain-managed` and refuse a settings file that is not a
+  JSON object.
 - Embeddings (Phase 12, I3, I5): off by default (`provider: none` runs no
   `src/net/` code, asserted by a spy test). The Ollama client lives in
   `src/net/`; the base URL must be loopback or in `network.allowedHosts`, which

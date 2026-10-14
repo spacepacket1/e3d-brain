@@ -73,7 +73,7 @@ export function entryPoint(): { node: string; script: string } {
   return { node: process.execPath, script: fileURLToPath(new URL('./main.js', import.meta.url)) };
 }
 
-function shellQuote(s: string): string {
+export function shellQuote(s: string): string {
   return /^[A-Za-z0-9_@%+=:,./-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`;
 }
 

@@ -7,6 +7,7 @@ import { runInbox } from './inbox-commands.js';
 import { runIndexCommand, runReindex, type CommandResult } from './index-commands.js';
 import { runInit, terminalPrompt } from './init.js';
 import { isConversationImportSource, runConversationImport } from './import-commands.js';
+import { runHook } from './hook-commands.js';
 import { runImport, runJournal } from './journal-commands.js';
 import { runRefs } from './refs-commands.js';
 import { runScrub } from './scrub-command.js';
@@ -54,6 +55,11 @@ commands:
   refs remove <ref_id>
                     remove a book's rows from refs.db (your references/ note stays)
   refs reindex      rebuild refs.db from the original source files (moved sources are reported missing)
+  hook session-start
+                    print a session brief (Claude Code SessionStart hook; always exits 0)
+  hook pre-compact  write one checkpoint proposal to _inbox/ (needs mode inbox and hooks.captureCheckpoints: true)
+  hook install      add ebrain's SessionStart and PreCompact hooks to ~/.claude/settings.json
+  hook remove       remove only the hooks ebrain added
   scrub <file|-> [--strict] [--entropy-threshold <bits>]
                     print the text with secrets redacted; finding counts go to stderr
                     (--strict: agent rules, reject on any credential and exit 3)
@@ -132,6 +138,8 @@ export function main(argv: readonly string[]): number | Promise<number> {
       return isConversationImportSource(rest[0]) ? runConversationImport(rest).then(emit) : emit(runImport(rest));
     case 'refs':
       return runRefs(rest).then(emit);
+    case 'hook':
+      return emit(runHook(rest));
     case 'init':
       return runInitCommand(rest);
     case 'mcp':

@@ -192,6 +192,10 @@ Optional keys may be omitted to take their defaults.
 | `journal.maxTotalMB` | no | `100` | number above 0; total size of `journal/<principal-id>/` (stat sizes) |
 | `refs.excerptChars` | no | `400` | integer 1-1000; longest excerpt per reference-book hit in `search` (compact format: at most 200) |
 | `refs.maxHits` | no | `5` | integer 1-20; most reference-book hits per `search` call (also bounded by `limit`) |
+| `hooks.briefFolders` | no | `[]` | up to 32 vault-relative folders (`notes/work`) or `#tag` names whose recent accepted notes go in the session brief; empty lists no notes |
+| `hooks.focus` | no | `""` | up to 2000 characters of your own text placed in the session brief |
+| `hooks.captureCheckpoints` | no | `false` | must be exactly `true` for `hook pre-compact` to write a checkpoint |
+| `hooks.claudeProjectsDir` | no | `~/.claude/projects` | `pre-compact` reads a transcript only from a file under this directory |
 
 Later phases add keys here in the same change that adds them to the schema.
 
@@ -437,6 +441,36 @@ ebrain refs reindex              # rebuild refs.db from the original source file
   `missing` and one whose content changed is reported `changed` (its rows are
   kept); the command then exits 1. Books removed with `refs remove` are not
   brought back while `refs.db` remembers the removal.
+
+## Claude Code hooks
+
+```
+ebrain hook install     # add the SessionStart and PreCompact hooks to ~/.claude/settings.json
+ebrain hook remove      # remove only the entries ebrain added
+```
+
+- `ebrain hook session-start` prints a **brief** into the session: recent
+  accepted notes from `hooks.briefFolders` (newest first, titles and
+  citations only), the number of proposals waiting in `_inbox/`, and your
+  `hooks.focus` text. It is read-only, works in every mode, is fenced as
+  reference data, and is capped at 10,000 characters (or `limits.maxCharsPerCall`
+  if lower).
+- `ebrain hook pre-compact` runs before Claude Code compacts a session. Only
+  when `mode` is `inbox` **and** `hooks.captureCheckpoints` is `true` it reads
+  the transcript named in the hook JSON (only if it is a file under
+  `hooks.claudeProjectsDir`), takes the opening request and the last five user
+  turns, scrubs them, and writes one proposal to `_inbox/` (`origin: hook`,
+  `kind: raw`, `untrusted_origin: true`). Extractive: no model is called. Review
+  it with `ebrain inbox`.
+- Both hooks always exit 0 and print nothing on bad input, so they cannot break
+  a session.
+- Hook settings come only from the user-level `config.json`. A project's
+  `.claude/settings.json` (or any file in the working directory) cannot change
+  them.
+- `install` writes `<absolute node binary> <absolute path to dist/src/cli/main.js>
+  hook <event> --ebrain-managed`; the trailing flag marks entries ebrain owns.
+  Nothing depends on `PATH`. Re-run `install` after moving the checkout or
+  upgrading node. Your own hooks and every other setting are left as they are.
 
 ## Optional embeddings (hybrid search)
 
