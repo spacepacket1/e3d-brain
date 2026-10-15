@@ -1303,6 +1303,8 @@ Run it after `ebrain init` and after changing the config.
 An autonomous agent gets its own brain in `journal` mode (`principal.type:
 "agent"`). Each agent process launches its own `ebrain mcp` over stdio with
 its own config file, vault, and state dir; two agents never share a journal.
+A ready-made client and a worked integration are in
+[`examples/agent-memory/`](../examples/agent-memory/README.md).
 
 What journal mode does:
 

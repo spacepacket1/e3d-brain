@@ -1,0 +1,94 @@
+--- a/moltbook-heartbeat.js	2026-10-15 07:21:03
++++ b/moltbook-heartbeat.js	2026-10-15 07:28:23
+@@ -32,6 +32,39 @@
+ if (!MOLTBOOK_API_KEY) {
+   console.error('[heartbeat] MOLTBOOK_API_KEY is required');
+   process.exit(1);
++}
++
++// ── Memory (optional): an e3d-brain journal instance for this agent ────────────
++// Off unless BRAIN_CONFIG is set, so behaviour is unchanged by default. The client never throws and fails open:
++// if the brain is down the heartbeat just runs without memory. Recalled text is advisory only (see agent-brain.mjs).
++let brain = null;
++async function initBrain() {
++  if (!process.env.BRAIN_CONFIG || !process.env.BRAIN_MAIN) return;
++  try {
++    const { AgentBrain } = await import(process.env.BRAIN_CLIENT || '/Users/mini/e3d-brain/examples/agent-memory/agent-brain.mjs');
++    brain = await AgentBrain.open({ main: process.env.BRAIN_MAIN, config: process.env.BRAIN_CONFIG });
++    console.log(brain.disabled ? `[heartbeat] brain unavailable (${brain.reason}); running without memory` : '[heartbeat] brain memory on');
++  } catch (e) {
++    console.warn('[heartbeat] brain init failed; running without memory:', e.message);
++  }
++}
++async function recallBlock(query) {
++  if (!brain || brain.disabled) return '';
++  const { promptBlock } = await import(process.env.BRAIN_CLIENT || '/Users/mini/e3d-brain/examples/agent-memory/agent-brain.mjs');
++  return promptBlock(await brain.recall(query, { limit: 3, maxChars: 3000 }));
++}
++async function rememberPost({ kind, theirs, ours, mapsContext, postId }) {
++  if (!brain || brain.disabled || DRY_RUN) return;
++  const top = buildSignalContext(mapsContext).top_signal;
++  const sig = top ? `${top.signal_type || 'signal'} ${top.origin || '?'} to ${top.destination || '?'}, confidence ${top.confidence_pct}%, horizon ${top.time_horizon_hours ?? '?'}h` : 'no live signal';
++  await brain.remember({
++    title: `${kind === 'reply' ? 'Replied to a comment' : 'Commented on a feed post'} (${new Date().toISOString().slice(0, 16)}Z)`,
++    body: `Signal: ${sig}\nWhat they said (untrusted): ${String(theirs).slice(0, 400)}\nWhat I said: ${String(ours).slice(0, 600)}`,
++    kind: 'decision',
++    // third-party text: tagged untrusted, which the brain requires to cite a source
++    untrusted: true,
++    sources: [`url:https://www.moltbook.com/post/${encodeURIComponent(String(postId))}`],
++  });
+ }
+ 
+ // ── State ─────────────────────────────────────────────────────────────────────
+@@ -239,11 +272,12 @@
+ - Destination prediction or narrative → PREDICTION: where capital is moving, confidence %, time horizon
+ 2-4 sentences. If off-topic or spam, respond with exactly: null`;
+ 
++  const memory = await recallBlock(commentText);
+   const userPrompt = `Comment: "${commentText}"
+ 
+ Live signal data:
+ ${contextStr}
+-
++${memory ? `\n${memory}\n` : ''}
+ Reply with a recommendation or prediction from the data. If off-topic or spam, respond with exactly: null`;
+ 
+   if (!CLAUDE_ENABLED) {
+@@ -280,7 +314,8 @@
+ async function generateFeedComment(postText, mapsContext) {
+   if (!CLAUDE_ENABLED) return null;
+   const contextStr = JSON.stringify(buildSignalContext(mapsContext)).slice(0, 1000);
+-  const userPrompt = `Post in agentfinance:\n"${postText.slice(0, 500)}"\n\nLive signals:\n${contextStr}\n\nWrite a recommendation or prediction comment, or null.`;
++  const memory = await recallBlock(postText.slice(0, 300));
++  const userPrompt = `Post in agentfinance:\n"${postText.slice(0, 500)}"\n\nLive signals:\n${contextStr}${memory ? `\n\n${memory}` : ''}\n\nWrite a recommendation or prediction comment, or null.`;
+   try {
+     const reply = await askOrNull({ system: FEED_COMMENT_SYSTEM, prompt: userPrompt, maxTokens: 200 });
+     if (!reply || reply === 'null') return null;
+@@ -381,7 +416,8 @@
+       const reply = await generateReply(commentText, mapsContext);
+ 
+       if (reply) {
+-        await postComment(postId, reply, commentId);
++        const posted = await postComment(postId, reply, commentId);
++        if (posted) await rememberPost({ kind: 'reply', theirs: commentText, ours: reply, mapsContext, postId });
+         await sleep(2000); // respect 1/20s comment rate limit
+       } else {
+         console.log(`[heartbeat] No reply warranted for comment ${commentId}`);
+@@ -431,7 +467,7 @@
+         if (!comment) { console.log('[heartbeat] No comment warranted'); continue; }
+ 
+         const ok = await postComment(post.id, comment);
+-        if (ok) { state.lastFeedCommentAt = now; break; } // 1 successful comment per interval
++        if (ok) { await rememberPost({ kind: 'feed', theirs: postText, ours: comment, mapsContext, postId: post.id }); state.lastFeedCommentAt = now; break; } // 1 successful comment per interval
+       }
+     } else {
+       const nextMin = Math.round((FEED_COMMENT_MS - (now - (state.lastFeedCommentAt || 0))) / 60000);
+@@ -451,6 +487,8 @@
+   console.log(`[heartbeat] Interval: ${INTERVAL_MS / 60000} min | DRY_RUN: ${DRY_RUN}`);
+   console.log(`[heartbeat] State file: ${STATE_FILE}`);
+ 
++  await initBrain();
++
+   // Run once immediately, then on interval
+   await heartbeat().catch((e) => console.error('[heartbeat] Tick error:', e.message));
+ 

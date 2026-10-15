@@ -45,7 +45,7 @@ tested.
 |---|---|
 | **Memory layer** | 15 phases built ([`docs/e3d-brain-spec.md`](docs/e3d-brain-spec.md)) |
 | **Cognition layer** | 9 phases built ([`docs/e3d-brain-cognition-spec.md`](docs/e3d-brain-cognition-spec.md)) |
-| **Tests** | 622 passing, plus 24 per-phase verification scripts |
+| **Tests** | 664 passing, plus 24 per-phase verification scripts |
 | **Verified on** | macOS (Apple silicon). **Not yet run on Linux.** |
 
 What is *not* done, so you can judge it fairly:
@@ -193,7 +193,7 @@ before they ever create review work.
 npm ci --ignore-scripts
 npm run build:native      # the one documented native build (better-sqlite3)
 npm run build
-npm test                  # 622 tests
+npm test                  # 664 tests
 
 node dist/src/cli/main.js init --vault ~/Brain --principal you
 node dist/src/cli/main.js doctor --strict
