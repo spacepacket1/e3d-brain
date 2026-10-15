@@ -127,6 +127,8 @@ export interface RankItem extends TierInput {
   fused?: number;
   /** `created` (ISO 8601); used only with `newestFirst`. */
   created?: string | null;
+  /** Evidence-linked good minus bad reports for the note (cognition Phase 8); read only with `usageBoost`. Never from self-reported events. */
+  usageNet?: number;
 }
 
 export interface Ranked<T extends RankItem> {
@@ -142,6 +144,16 @@ export interface RankOptions {
    * newer `created` first (absent or unparseable last), before the path rule.
    */
   newestFirst?: boolean;
+  /**
+   * Cognition Phase 8 (`rank.usageBoost`, default off): after the normal order,
+   * an item with a positive `usageNet` swaps one place up with the item ahead
+   * of it, and one with a negative `usageNet` one place down, but only inside
+   * the same tier and source, and each item takes part in at most one swap, so
+   * nothing moves more than one position. The magnitude of `usageNet` does not
+   * matter (that is the cap). With this off, `usageNet` is ignored and the order
+   * is a pure function of vault and config (I11).
+   */
+  usageBoost?: boolean;
 }
 
 function tierKey(t: TierOrHidden): number {
@@ -184,11 +196,38 @@ export function tierOf(item: RankItem): TierOrHidden {
   return effectiveTier(item.folderClass, item.status, item);
 }
 
+/** The bounded usage nudge (see `RankOptions.usageBoost`): adjacent same-tier swaps, at most one per item. */
+function applyUsageNudge<T extends RankItem>(list: Ranked<T>[]): void {
+  const sign = (r: Ranked<T>): number => Math.sign(r.item.usageNet ?? 0);
+  const sameGroup = (a: Ranked<T>, b: Ranked<T>): boolean => a.tier === b.tier && (a.item.source ?? 'note') === (b.item.source ?? 'note');
+  const moved = new Set<Ranked<T>>();
+  const swap = (i: number): void => {
+    const a = list[i]!;
+    const b = list[i + 1]!;
+    list[i] = b;
+    list[i + 1] = a;
+    moved.add(a);
+    moved.add(b);
+  };
+  for (let i = 1; i < list.length; i++) {
+    const up = list[i]!;
+    const ahead = list[i - 1]!;
+    if (sign(up) > 0 && sign(ahead) <= 0 && !moved.has(up) && !moved.has(ahead) && sameGroup(up, ahead)) swap(i - 1);
+  }
+  for (let i = list.length - 2; i >= 0; i--) {
+    const down = list[i]!;
+    const behind = list[i + 1]!;
+    if (sign(down) < 0 && sign(behind) >= 0 && !moved.has(down) && !moved.has(behind) && sameGroup(down, behind)) swap(i);
+  }
+}
+
 /** The final order of a result list. Returns new entries; the input is not modified. */
 export function rank<T extends RankItem>(items: readonly T[], opts: RankOptions = {}): Ranked<T>[] {
   const ranked = items.map((item) => ({ item, tier: tierOf(item) }));
   const visible = opts.includeHidden === true ? ranked : ranked.filter((r) => r.tier !== 'hidden');
-  return visible.sort((a, b) => compareRanked(a, b, opts));
+  const sorted = visible.sort((a, b) => compareRanked(a, b, opts));
+  if (opts.usageBoost === true) applyUsageNudge(sorted);
+  return sorted;
 }
 
 // ---- hybrid search (Phase 12) ----

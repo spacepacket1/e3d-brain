@@ -8,6 +8,7 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { AuditLog, segmentBytes } from '../audit/audit.js';
+import { QueryLog } from '../recall/queries.js';
 import { RecallLog } from '../recall/recalls.js';
 import { closeIndex, openIndex } from '../index/indexer.js';
 import { checkFts5 } from '../index/sqlite.js';
@@ -17,6 +18,7 @@ import { attachToServer, listTools, ToolRegistry, type DispatchContext } from '.
 import { registerInboxTools } from './inbox-tools.js';
 import { registerJournalTools } from './journal-tools.js';
 import { registerRefTools } from './ref-tools.js';
+import { registerUsageTools } from './usage-tools.js';
 import { createEmbedder } from '../net/ollama.js';
 import { registerReadTools, type RefsEnv } from './tools.js';
 
@@ -58,8 +60,15 @@ export function createMcpRuntime(loaded: LoadedConfig): McpRuntime {
   const refs: RefsEnv = { stateDir, excerptChars: config.refs.excerptChars, maxHits: config.refs.maxHits };
   // Optional embeddings (Phase 12): none by default, so no network code runs.
   const embedder = createEmbedder(config.embeddings, config.network.allowedHosts);
-  registerReadTools({ vaultPath: config.vaultPath, index, mode: config.mode, refs, embedder, extraPatterns: config.scrub.extraPatterns }, registry);
+  // Opt-in query log (cognition Phase 8): scrubbed queries for the owner's `gaps` job; off by default, so no file exists.
+  const queries = config.queryLog.enabled ? new QueryLog(stateDir, { extraPatterns: config.scrub.extraPatterns }) : undefined;
+  registerReadTools({
+    vaultPath: config.vaultPath, index, mode: config.mode, refs, embedder, extraPatterns: config.scrub.extraPatterns, usageBoost: config.rank.usageBoost,
+    ...(queries === undefined ? {} : { queryLog: { log: (e) => void queries.append({ ...e, principal: config.principal.id }) } }),
+  }, registry);
   registerRefTools(refs, registry);
+  // report_use exists in every mode (cognition Phase 8): it writes the state directory only, never the vault.
+  registerUsageTools({ stateDir, extraPatterns: config.scrub.extraPatterns }, registry);
   // capture and list_inbox exist in inbox mode only (Phase 8, I2).
   if (config.mode === 'inbox') registerInboxTools({ vaultPath: config.vaultPath, index, extraPatterns: config.scrub.extraPatterns }, registry);
   // journal_append and journal_list exist in journal mode only (Phase 9, I2; journal mode requires an agent principal).

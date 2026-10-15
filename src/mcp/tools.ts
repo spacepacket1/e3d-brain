@@ -29,6 +29,7 @@ import type { Mode } from '../config.js';
 import { MODES, registerTool, ToolRejection, type ReturnedNote, type ToolRegistry, type ToolResult } from './dispatch.js';
 import { fence, truncateText } from './fence.js';
 import { MAX_CHARS_SCHEMA, type ObjectSchema, type Schema } from './schema.js';
+import { usageNetByNote } from '../recall/usage-rollup.js';
 import { ulid } from './ulid.js';
 
 /** Excerpt length in compact format (I6). */
@@ -67,6 +68,10 @@ export interface ReadToolEnv {
   /** Optional embeddings (Phase 12): when set, `search` fuses vector similarity with BM25. Absent: BM25 only. */
   embedder?: Embedder;
   extraPatterns?: readonly string[];
+  /** `rank.usageBoost` (cognition Phase 8): nudge `search` by evidence-linked usage from the last `note_usage` rollup. Off: ordering is a pure function of vault and config. */
+  usageBoost?: boolean;
+  /** Opt-in query log (cognition Phase 8, `queryLog.enabled`); a failure to log never fails a search. */
+  queryLog?: { log(entry: { recall_id: string; query: string; results: number; top_tier: number | null }): void };
 }
 
 // ---- schemas ----
@@ -611,11 +616,16 @@ async function search(env: ReadToolEnv, args: Record<string, unknown>, maxChars:
       embeddings = 'unavailable';
     }
   }
+  const usageNet = env.usageBoost === true ? usageNetByNote(db) : undefined;
   const notes = candidates
-    .map((h) => rankItem({ row: h as NoteRow, hit: h, ordinal: h.ordinal, bm25: h.bm25, ...(fused === undefined ? {} : { fused: fused.get(chunkKey({ path: h.path, ordinal: h.ordinal })) ?? 0 }) }));
+    .map((h) => rankItem({
+      row: h as NoteRow, hit: h, ordinal: h.ordinal, bm25: h.bm25,
+      ...(fused === undefined ? {} : { fused: fused.get(chunkKey({ path: h.path, ordinal: h.ordinal })) ?? 0 }),
+      ...(usageNet === undefined ? {} : { usageNet: usageNet.get((h as NoteRow).id) ?? 0 }),
+    }));
   const refs = match !== undefined && (scope === 'refs' || scope === 'all') ? refCandidates(env, match, advanced) : [];
   // Notes first, then books (rank.ts); at most `limit` notes and min(limit, refs.maxHits) book passages.
-  const ranked = rank<RankItem & { row?: NoteRow; hit?: (typeof hits)[number]; ref?: RefHit }>([...notes, ...refs], { includeHidden: true });
+  const ranked = rank<RankItem & { row?: NoteRow; hit?: (typeof hits)[number]; ref?: RefHit }>([...notes, ...refs], { includeHidden: true, ...(env.usageBoost === true ? { usageBoost: true } : {}) });
   const refLimit = Math.min(limit, env.refs?.maxHits ?? 0);
   const kept = [
     ...ranked.filter((r) => r.item.ref === undefined).slice(0, limit),
@@ -639,7 +649,16 @@ async function search(env: ReadToolEnv, args: Record<string, unknown>, maxChars:
   const extra: Record<string, unknown> = { matched: notes.length + refs.length };
   if (scope !== 'notes') extra['scope'] = scope;
   if (embeddings !== undefined) extra['embeddings'] = embeddings;
-  return listResponse('search', format, items, maxChars, { ...extra, ...proposedNotice(noteRows, noteRows.length < kept.length) });
+  const result = listResponse('search', format, items, maxChars, { ...extra, ...proposedNotice(noteRows, noteRows.length < kept.length) });
+  if (env.queryLog !== undefined && result.recall_id !== undefined) {
+    const top = kept[0]?.tier;
+    try {
+      env.queryLog.log({ recall_id: result.recall_id, query, results: kept.length, top_tier: top === undefined ? null : top === 'hidden' ? 9 : top });
+    } catch {
+      // logging is best effort
+    }
+  }
+  return result;
 }
 
 function readNote(env: ReadToolEnv, args: Record<string, unknown>, maxChars: number): ToolResult {

@@ -12,6 +12,8 @@ import { listRunRecords, type RunRecord } from '../cognition/runs.js';
 import { PromptFileError } from '../cognition/prompts.js';
 import { discoverEvidence, EvidenceError, openEvidence, type OpenEvidence } from '../evidence/store.js';
 import { closeIndex, openIndex, refreshIndex } from '../index/indexer.js';
+import { allNoteRows } from '../index/query.js';
+import { rebuildNoteUsage } from '../recall/usage-rollup.js';
 import { createProvider, DATA_LEAVES_MACHINE_FLAG, LlmRefusedError, type ExtractionProvider } from '../llm/provider.js';
 import { SafePathError } from '../safe-path.js';
 import { isIsoDate } from '../vault/parse.js';
@@ -19,7 +21,7 @@ import type { CommandResult } from './index-commands.js';
 
 export const COGNITION_USAGE = `usage: ebrain cognition run <job> [--since <date>] [--max-proposals <n>] [--dry-run] [--reconsider] [${DATA_LEAVES_MACHINE_FLAG}]
        ebrain cognition runs [-n <count>]
-       ebrain cognition stats forget
+       ebrain cognition stats forget | usage
 jobs: ${JOBS.map((j) => `${j.name} (${j.description})`).join('; ')}`;
 
 export interface CognitionCommandOptions extends EnvOptions {
@@ -78,9 +80,16 @@ function summarize(r: RunRecord, created: { id: string; path: string }[], maxPen
   if (r.job === 'forget') {
     lines.push(
       `forget: ${c('eligible_notes')} notes considered; skipped ${c('skipped_pinned')} pinned, ${c('skipped_exempt_kind')} of an exempt kind, ${c('skipped_young')} too young, ` +
-        `${c('skipped_recalled')} recalled within the window, ${c('skipped_no_history')} without enough recall history, ${c('skipped_cited')} cited by an accepted note; ` +
+        `${c('skipped_recalled')} recalled within the window, ${c('skipped_no_history')} without enough recall history, ${c('skipped_cited')} cited by an accepted note, ${c('skipped_evidence_useful')} with a good evidence-linked outcome; ` +
         `${c('demote_candidates')} demote and ${c('archive_candidates')} archive candidates (${c('expired_journal')} expired journal entries)`,
       'nothing is deleted: demote sets status: stale, archive moves to _archive/; review each with: ebrain review show <id>',
+    );
+  }
+  if (r.job === 'gaps') {
+    lines.push(
+      `gaps: ${c('queries')} logged queries (${c('queries_empty')} with no usable words) in ${c('clusters')} clusters; ${c('gap_clusters')} met cognition.gaps.minQueries and minPoorRate` +
+        (c('groups_capped') > 0 ? `; ${c('groups_capped')} rarer query groups left out` : ''),
+      'a gap proposal changes nothing; with no logged queries, enable queryLog.enabled and search for a while first',
     );
   }
   if (r.job === 'reflect') {
@@ -156,7 +165,7 @@ async function runCommand(args: readonly string[], opts: CognitionCommandOptions
   let evidence: OpenEvidence | undefined;
   try {
     // Jobs that need ground truth get it only when an evidence file is configured and readable; runJob refuses otherwise.
-    if (job.evidence === 'required' && discoverEvidence(config).some((f) => f.refused === undefined)) evidence = openEvidence({ config, stateDir });
+    if (job.evidence !== undefined && discoverEvidence(config).some((f) => f.refused === undefined)) evidence = openEvidence({ config, stateDir });
     const r = await runJob({
       config, stateDir, index: h, job, dryRun, reconsider,
       ...(provider === undefined ? {} : { provider }),
@@ -195,15 +204,54 @@ function runsCommand(args: readonly string[], opts: CognitionCommandOptions): Co
 
 const STATS_TOP = 10;
 
-function statsCommand(args: readonly string[], opts: CognitionCommandOptions): CommandResult {
-  if (args[0] !== 'forget' || args.length !== 1) return usage(args.length === 0 ? 'stats needs a report name (forget)' : `unknown stats report ${JSON.stringify(args[0])} (expected: forget)`);
+function usageStats(opts: CognitionCommandOptions): CommandResult {
   let h: ReturnType<typeof openIndex> | undefined;
+  let evidence: OpenEvidence | undefined;
   try {
     const { config } = loadConfig(opts);
     const stateDir = ensureStateDir(config);
     h = openIndex({ vaultPath: config.vaultPath, stateDir });
     refreshIndex(h);
-    const a = analyzeForget({ config, index: h, stateDir, now: (opts.now ?? (() => new Date()))() });
+    if (discoverEvidence(config).some((f) => f.refused === undefined)) evidence = openEvidence({ config, stateDir });
+    const rows = rebuildNoteUsage(h.db, stateDir, evidence);
+    const paths = new Map(allNoteRows(h.db).map((r) => [r.id, r.path]));
+    const sum = (k: 'recalls' | 'reported_used' | 'evidence_linked_good' | 'evidence_linked_bad'): number => rows.reduce((a, r) => a + r[k], 0);
+    const lines = [
+      `usage stats: ${rows.length} notes recalled or reported`,
+      `totals: ${sum('recalls')} recalls, ${sum('reported_used')} reported used (self-reported), ${sum('evidence_linked_good')} evidence-linked good, ${sum('evidence_linked_bad')} evidence-linked bad`,
+      `evidence source: ${evidence === undefined ? 'none configured (nothing can be evidence-linked)' : 'local evidence'}`,
+      `ranking: rank.usageBoost is ${config.rank.usageBoost ? 'on' : 'off'} (only evidence-linked counts can affect ranking; self-reported never)`,
+    ];
+    const top = [...rows]
+      .sort((a, b) => b.evidence_linked_good - b.evidence_linked_bad - (a.evidence_linked_good - a.evidence_linked_bad) || b.reported_used - a.reported_used || b.recalls - a.recalls || (a.id < b.id ? -1 : 1))
+      .slice(0, STATS_TOP);
+    if (top.length > 0) {
+      lines.push(`top ${top.length} (evidence-linked net, then reported used, then recalls):`);
+      for (const r of top) {
+        lines.push(`  ${paths.get(r.id) ?? r.id}: recalls ${r.recalls}; reported used ${r.reported_used} (self-reported); evidence-linked ${r.evidence_linked_good} good, ${r.evidence_linked_bad} bad`);
+      }
+    }
+    return { code: 0, stdout: `${lines.join('\n')}\n`, stderr: '' };
+  } catch (err) {
+    return fail(`${err instanceof ConfigError ? 'config: ' : ''}${message(err)}`);
+  } finally {
+    evidence?.close();
+    if (h !== undefined) closeIndex(h);
+  }
+}
+
+function statsCommand(args: readonly string[], opts: CognitionCommandOptions): CommandResult {
+  if (args[0] === 'usage' && args.length === 1) return usageStats(opts);
+  if (args[0] !== 'forget' || args.length !== 1) return usage(args.length === 0 ? 'stats needs a report name (forget, usage)' : `unknown stats report ${JSON.stringify(args[0])} (expected: forget, usage)`);
+  let h: ReturnType<typeof openIndex> | undefined;
+  let evidence: OpenEvidence | undefined;
+  try {
+    const { config } = loadConfig(opts);
+    const stateDir = ensureStateDir(config);
+    h = openIndex({ vaultPath: config.vaultPath, stateDir });
+    refreshIndex(h);
+    if (discoverEvidence(config).some((f) => f.refused === undefined)) evidence = openEvidence({ config, stateDir });
+    const a = analyzeForget({ config, index: h, stateDir, now: (opts.now ?? (() => new Date()))(), ...(evidence === undefined ? {} : { evidence }) });
     const c = (k: string): number => a.counts[k] ?? 0;
     const f = config.cognition.forget;
     const lines = [
@@ -211,7 +259,7 @@ function statsCommand(args: readonly string[], opts: CognitionCommandOptions): C
       `recall record starts: ${a.trackingStart ?? 'no records yet (never-recalled notes are not candidates)'}`,
       `notes considered: ${c('eligible_notes')}`,
       `skipped: ${c('skipped_pinned')} pinned, ${c('skipped_exempt_kind')} exempt kind, ${c('skipped_young')} too young, ${c('skipped_recalled')} recalled in the window, ` +
-        `${c('skipped_no_history')} without enough recall history, ${c('skipped_cited')} cited by an accepted note, ${c('skipped_provisional')} provisional id`,
+        `${c('skipped_no_history')} without enough recall history, ${c('skipped_cited')} cited by an accepted note, ${c('skipped_evidence_useful')} with a good evidence-linked outcome, ${c('skipped_provisional')} provisional id`,
       `candidates: ${c('demote_candidates')} demote, ${c('archive_candidates')} archive` +
         (config.journal.pruneRequiresReview ? ` (including ${c('expired_journal')} expired journal entries)` : ''),
     ];
@@ -223,6 +271,7 @@ function statsCommand(args: readonly string[], opts: CognitionCommandOptions): C
   } catch (err) {
     return fail(`${err instanceof ConfigError ? 'config: ' : ''}${message(err)}`);
   } finally {
+    evidence?.close();
     if (h !== undefined) closeIndex(h);
   }
 }

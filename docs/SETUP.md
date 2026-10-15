@@ -93,7 +93,8 @@ config file.
 
 Read tools are available in every mode; `capture` and `list_inbox` exist only
 in `inbox` mode, and `journal_append` and `journal_list` only in `journal`
-mode (elsewhere they are unknown tools).
+mode (elsewhere they are unknown tools). `report_use` is available in every
+mode, `read-only` included (see Usefulness feedback).
 There is no MCP tool to accept, edit, move, delete, or overwrite anything in
 any mode.
 
@@ -106,6 +107,7 @@ any mode.
 | `capture` (inbox mode) | `title`, `body`, `kind?` (`fact`, `decision`, `preference`, `idea` (default), `lesson`, `reference`), `sources?` (citations, at most 50): proposes a note in `_inbox/` (see Inbox) |
 | `list_inbox` (inbox mode) | `limit?` (default 50, max 200), `max_chars?`, `format?`: proposals waiting for review, with citations |
 | `read_ref_chunk` | `ref_id`, `chapter`, `ordinal` (the parts of a `ref:<ref_id>/<chapter>/<ordinal>` citation), `max_chars?`, `format?`: one passage of a reference book, with `prev`/`next` citations (see Reference library) |
+| `report_use` | `recall_id`, `note_ids?` (at most 25, a subset of what that recall returned), `outcome_ref?` (a citation such as `outcome:<id>`), `helpful?`: report which recalled notes you used; appends a `self_reported` event to `<stateDir>/usage.jsonl` (see Usefulness feedback) |
 | `journal_append` (journal mode) | `title`, `body`, `kind?` (`log` (default), `observation`, `lesson`, `decision`, `todo`), `sources?` (citations, at most 50), `untrusted_origin?` (needs a source): creates a new entry under `journal/<principal-id>/` (see Agents) |
 | `journal_list` (journal mode) | `since?` (ISO date), `kind?`, `limit?` (default 20, max 200), `max_chars?`, `format?`: your own entries, newest first within each tier |
 
@@ -206,6 +208,9 @@ Optional keys may be omitted to take their defaults.
 | `llm.maxOutputTokens` | no | `2048` | integer 64-64000; completion size requested per call |
 | `llm.timeoutMs` | no | `120000` | integer 1000-600000; per-call timeout |
 | `recallLog.retentionDays` | no | `180` | integer 1-36500; `ebrain recalls prune` drops recall records older than this |
+| `queryLog.enabled` | no | `false` | `true` or `false`; when `true`, `search` appends the scrubbed query, `recall_id`, result count, and top-hit tier to `<stateDir>/queries.jsonl` for the `gaps` job; off: no file is ever written |
+| `queryLog.retentionDays` | no | `30` | integer 1-36500; `ebrain queries prune` drops logged queries older than this |
+| `rank.usageBoost` | no | `false` | `true` or `false`; nudge `search` results by evidence-linked usage (see Usefulness feedback); off: ordering is a pure function of vault and config |
 | `inbox.maxPendingProposals` | no | `50` | integer 1-10000; a cognition run stops creating proposals once this many typed proposals are open (`status: proposed`) in `_inbox/` |
 | `cognition.supersede.minJaccard` | no | `0.5` | number above 0, at most 1; `supersede` pairs two notes of the same kind (`decision`, `preference`, `fact`) when their 3-word-shingle Jaccard similarity is at least this |
 | `cognition.supersede.maxUnadjudicated` | no | `5` | integer 1-10000; without an LLM provider, at most this many `supersede` candidate pairs become `needs_review: unadjudicated` proposals per run |
@@ -218,6 +223,9 @@ Optional keys may be omitted to take their defaults.
 | `cognition.forget.windowDays` | no | `180` | integer 1-36500; `forget` proposes only notes with no recall in this many days (keep `recallLog.retentionDays` at least this large) |
 | `cognition.forget.minAgeDays` | no | `90` | integer 1-36500; and whose latest of `occurred`, `created`, and file modified time is at least this old |
 | `cognition.forget.exemptKinds` | no | `["decision", "reference"]` | array of lowercase kind names; notes of these kinds are never proposed (a decision or reference is often the sole record of something) |
+| `cognition.gaps.minQueries` | no | `3` | integer 1-10000; `gaps` reports a cluster only when it was asked at least this many times |
+| `cognition.gaps.minPoorRate` | no | `0.5` | number above 0, at most 1; ... and at least this fraction of its queries had a poor result (none, or a first result of tier 6 or lower) |
+| `cognition.gaps.minSimilarity` | no | `0.5` | number above 0, at most 1; two query token sets are one cluster when their Jaccard similarity is at least this |
 | `cognition.maxProposalsPerRun` | no | `20` | integer 1-10000; most proposals one cognition run creates (`--max-proposals` overrides); LLM caps are `llm.maxCallsPerRun` and `llm.maxInputCharsPerRun` |
 | `evidence.dir` | no | `<stateDir>/evidence` | absolute or `~/`; not inside the vault (or containing it) and not the state directory itself; `evidence import` writes here and every `*.jsonl` in it is loaded |
 | `evidence.sources` | no | `[]` | up to 64 `.jsonl` files (absolute or `~/`, no `.`/`..` segments), outside the vault and the state directory; read-only, loaded before `evidence.dir` |
@@ -671,6 +679,73 @@ ignores the journal.
 
 `ebrain cognition stats forget` prints the counts and the ten top candidates
 with their signal values, and writes nothing.
+
+**Usage signals.** Each run also rebuilds the `note_usage` rollup (see
+Usefulness feedback) and shows `reported used` and the evidence-linked
+counts beside the other signals. A note whose evidence-linked good count
+exceeds its bad count is skipped (`skipped_evidence_useful`); a recorded good
+outcome outweighs quiet. Self-reported use is shown but never gates a
+proposal. Without a configured evidence source nothing is evidence-linked.
+
+## Usefulness feedback and gaps
+
+**`report_use`.** After using notes from a read result, an agent (or a human
+client) can call `report_use({recall_id, note_ids?, outcome_ref?, helpful?})`.
+It appends one event per note to `<stateDir>/usage.jsonl` (`0600`; the state
+directory only, never the vault) and is the only state write MCP makes
+outside its mode's vault fence, so it exists in `inbox`, `journal`, and
+`read-only` instances alike. Checks: the `recall_id` must be in
+`recalls.jsonl` for the calling principal; `note_ids` must all be ids that
+recall returned (at most 25, none repeated); `outcome_ref` must be a
+well-formed citation with no credential in it. A repeat of an already
+recorded (recall, note) pair is ignored (the first report wins); a call with
+no `note_ids` records one recall-level event no per-note rollup counts. At
+most 100 events per principal per minute, and a full log (4 MiB) refuses new
+events until you trim it. Every event is labeled `self_reported`.
+
+**Rollup.** `ebrain cognition stats usage` (and every `forget` run) rebuilds
+the derived `note_usage` table in the index from `recalls.jsonl` and
+`usage.jsonl`: per note id, `recalls`, `reported_used` (events not marked
+`helpful: false`), `evidence_linked_good`, and `evidence_linked_bad`. (It
+reads `recalls.jsonl`, not the audit log, because audit lines may truncate
+their returned-id list.) Deleting the table or the index loses nothing; a
+rebuild from the same logs and evidence gives identical rows. An event is
+**evidence-linked** only when its `outcome_ref` resolves in local evidence
+(`thesis:` or `outcome:`), that record occurred at or after the recall, and
+its attributes give a verdict: `result` of `good`, `success`, `win`,
+`positive`, or `profit` (good), or `bad`, `failure`, `loss`, or `negative`
+(bad), or a boolean `success`. The rollup uses the evidence files configured
+under Evidence files; without any, nothing is evidence-linked.
+
+**Ranking.** By default usage never affects ranking. With `rank.usageBoost:
+true`, `search` moves a note whose evidence-linked good count exceeds its bad
+count one place up inside its tier, and one whose bad count exceeds its good
+count one place down (never across tiers, at most one place for any result,
+whatever the counts). Only the evidence-linked counters, as of the last
+rollup, count: self-reported events never affect ranking, because anything
+that can call a tool can claim a note was useful. With the option on,
+ordering depends on the counter state as well as vault and config (an
+amendment of I11 for this feature; off, ordering is a pure function of vault
+and config).
+
+**Query log and `gaps`.** With `queryLog.enabled: true`, each `search`
+appends `{ts, recall_id, principal, query, results, top_tier}` to
+`<stateDir>/queries.jsonl` (`0600`). The query is scrubbed with strict
+rules first: one containing a credential is not logged at all. Off (the
+default), the file is never created. `ebrain queries prune [--older-than
+<days>]` drops records past `queryLog.retentionDays` (default 30).
+
+`ebrain cognition run gaps` (no model) clusters logged queries by
+deterministic text similarity: lower-cased words minus a short stop list,
+token sets with Jaccard similarity of at least `cognition.gaps.minSimilarity`
+are one cluster. A cluster that was asked at least `minQueries` times with a
+poor-result rate of at least `minPoorRate` (no result, or a first result of
+tier 6 or lower) becomes a `gap` proposal in `_inbox/`: "Asked N times, best
+result tier T, M results", with example scrubbed queries. Priority: most
+queries, then highest poor-result rate. A gap proposal changes nothing and
+cites no evidence; accepting only files it, and its key is the hash of the
+cluster's token set, so a rejected gap is not proposed again. The log is
+read as a whole (`--since` limits it by date).
 
 ## Evidence files (thesis and outcome records)
 

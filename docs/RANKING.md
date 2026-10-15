@@ -89,3 +89,18 @@ later `created` come first (absent or unparseable `created` last), then rules
 
 The result is fully deterministic: the same vault, config, and query give the
 same order on every platform.
+
+## Usage nudge (cognition Phase 8, off by default)
+
+`rank.usageBoost: true` adds one bounded step after the order above, for
+`search` only: a note whose evidence-linked good count exceeds its bad count
+swaps one place up with the result ahead of it, and one whose bad count
+exceeds its good count one place down, but only when both are in the same
+tier and source, and each result takes part in at most one swap, so nothing
+moves more than one place (the size of the difference is irrelevant). Only
+the evidence-linked counters from the last `note_usage` rollup are read;
+self-reported events never are, because an agent can claim anything.
+
+This amends I11 for this feature only: with the option on, the order is
+deterministic for a fixed vault, config, **and counter state**. With the
+default (off) it remains a pure function of vault and config.

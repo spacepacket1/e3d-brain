@@ -1,10 +1,11 @@
 // `ebrain ids assign [--folder <f>] [--dry-run]`, `ebrain undo <operation-id>`,
-// `ebrain undo --list`, and `ebrain recalls prune [--older-than <days>]`
+// `ebrain undo --list`, and `ebrain recalls prune [--older-than <days>]`, and `ebrain queries prune [--older-than <days>]`
 // (cognition Phase 1). Owner CLI only; none of these is an MCP tool (I2), and
 // they work in every instance mode (C11).
 
 import { ConfigError, ensureStateDir, loadConfig, type Config, type EnvOptions } from '../config.js';
 import { assignIds } from '../ids/assign.js';
+import { pruneQueries } from '../recall/queries.js';
 import { pruneRecalls } from '../recall/recalls.js';
 import { SafePathError, type SafePath } from '../safe-path.js';
 import { listOperations, restore, UndoError } from '../undo/store.js';
@@ -12,6 +13,7 @@ import type { CommandResult } from './index-commands.js';
 
 export const IDS_USAGE = 'usage: ebrain ids assign [--folder <f>] [--dry-run]';
 export const UNDO_USAGE = 'usage: ebrain undo <operation-id> | ebrain undo --list';
+export const QUERIES_USAGE = 'usage: ebrain queries prune [--older-than <days>]';
 export const RECALLS_USAGE = 'usage: ebrain recalls prune [--older-than <days>]';
 
 export interface UndoCommandOptions extends EnvOptions {
@@ -105,5 +107,22 @@ export function runRecalls(args: readonly string[], opts: UndoCommandOptions = {
     const retention = days ?? config.recallLog.retentionDays;
     const r = pruneRecalls(stateDir, retention, opts.now?.() ?? new Date());
     return { code: 0, stdout: `recalls prune: kept ${r.kept}, removed ${r.removed} (older than ${retention} days)\n`, stderr: '' };
+  });
+}
+
+export function runQueries(args: readonly string[], opts: UndoCommandOptions = {}): CommandResult {
+  const [sub, ...rest] = args;
+  if (sub !== 'prune') return usage('queries', QUERIES_USAGE, sub === undefined ? 'missing subcommand' : `unknown subcommand ${JSON.stringify(sub)}`);
+  let days: number | undefined;
+  if (rest.length > 0) {
+    if (rest.length !== 2 || rest[0] !== '--older-than' || !/^[0-9]{1,5}$/.test(rest[1]!) || Number(rest[1]) < 1) {
+      return usage('queries', QUERIES_USAGE, 'expected --older-than <days> (a positive integer)');
+    }
+    days = Number(rest[1]);
+  }
+  return withConfig('queries', opts, (config, stateDir) => {
+    const retention = days ?? config.queryLog.retentionDays;
+    const r = pruneQueries(stateDir, retention, opts.now?.() ?? new Date());
+    return { code: 0, stdout: `queries prune: kept ${r.kept}, removed ${r.removed} (older than ${retention} days)\n`, stderr: '' };
   });
 }

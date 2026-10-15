@@ -12,11 +12,11 @@ export type Db = BetterSqlite3.Database;
 export const INDEX_FILE = 'index.db';
 export const BUSY_TIMEOUT_MS = 10000;
 /** Bump when the table layout changes: an index with another version is rebuilt. */
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 const TABLES = [
   'meta', 'notes', 'chunks', 'chunks_fts', 'links', 'tags', 'aliases', 'headings', 'problems', 'cites', 'note_revisions',
-  'missing_ids', 'id_aliases', 'chunk_vectors', 'note_stats',
+  'missing_ids', 'id_aliases', 'chunk_vectors', 'note_stats', 'note_usage',
 ];
 
 const SCHEMA = `
@@ -132,6 +132,14 @@ CREATE TABLE chunk_vectors (
 ) STRICT;
 -- Recall rollup (cognition Phase 7): derived from recalls.jsonl by src/recall/stats.ts, rebuilt from it at any time.
 CREATE TABLE note_stats (id TEXT PRIMARY KEY, recall_count INTEGER NOT NULL, last_recalled TEXT NOT NULL) STRICT;
+-- Usage rollup (cognition Phase 8): derived from recalls.jsonl and usage.jsonl by src/recall/usage-rollup.ts, rebuilt from them at any time.
+CREATE TABLE note_usage (
+  id TEXT PRIMARY KEY,
+  recalls INTEGER NOT NULL,
+  reported_used INTEGER NOT NULL,
+  evidence_linked_good INTEGER NOT NULL,
+  evidence_linked_bad INTEGER NOT NULL
+) STRICT;
 CREATE TABLE problems (
   note_path TEXT NOT NULL, ordinal INTEGER NOT NULL, kind TEXT NOT NULL, field TEXT, detail TEXT NOT NULL,
   PRIMARY KEY (note_path, ordinal)

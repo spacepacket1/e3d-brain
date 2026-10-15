@@ -15,6 +15,7 @@ const SAMPLE: ToolEntry[] = [
   { name: 'journal_append', modes: ['journal'], phase: 9 },
   { name: 'read_ref_chunk', modes: ['inbox', 'journal', 'read-only'], phase: 11 },
   { name: 'list_inbox', modes: ['inbox'], phase: 8 },
+  { name: 'report_use', modes: ['inbox', 'journal', 'read-only'], phase: 'cog-8' },
 ];
 
 describe('tool registry fixture', () => {
@@ -27,14 +28,29 @@ describe('tool registry fixture', () => {
   });
 
   it('expectedTools filters by mode and phase and sorts', () => {
-    assert.deepEqual(expectedTools('inbox', 5, SAMPLE), []);
-    assert.deepEqual(expectedTools('inbox', 6, SAMPLE), ['search']);
-    assert.deepEqual(expectedTools('read-only', 8, SAMPLE), ['search']);
-    assert.deepEqual(expectedTools('inbox', 8, SAMPLE), ['capture', 'list_inbox', 'search']);
-    assert.deepEqual(expectedTools('journal', 9, SAMPLE), ['journal_append', 'search']);
-    assert.deepEqual(expectedTools('inbox', 9, SAMPLE), ['capture', 'list_inbox', 'search']);
-    assert.deepEqual(expectedTools('read-only', 15, SAMPLE), ['read_ref_chunk', 'search']);
-    assert.deepEqual(expectedTools('journal', 15, SAMPLE), ['journal_append', 'read_ref_chunk', 'search']);
+    assert.deepEqual(expectedTools('inbox', 5, 0, SAMPLE), []);
+    assert.deepEqual(expectedTools('inbox', 6, 0, SAMPLE), ['search']);
+    assert.deepEqual(expectedTools('read-only', 8, 0, SAMPLE), ['search']);
+    assert.deepEqual(expectedTools('inbox', 8, 0, SAMPLE), ['capture', 'list_inbox', 'search']);
+    assert.deepEqual(expectedTools('journal', 9, 0, SAMPLE), ['journal_append', 'search']);
+    assert.deepEqual(expectedTools('inbox', 9, 0, SAMPLE), ['capture', 'list_inbox', 'search']);
+    assert.deepEqual(expectedTools('read-only', 15, 0, SAMPLE), ['read_ref_chunk', 'search']);
+    assert.deepEqual(expectedTools('journal', 15, 0, SAMPLE), ['journal_append', 'read_ref_chunk', 'search']);
+  });
+
+  it('cognition entries are namespaced: memory-phase assertions never include them', () => {
+    for (const mode of TOOL_MODES) {
+      assert.ok(!expectedTools(mode, 15).includes('report_use'));
+      assert.ok(!expectedTools(mode, 99).includes('report_use'));
+      assert.ok(!expectedTools(mode, 15, 7).includes('report_use'));
+      assert.ok(expectedTools(mode, 0, 8).includes('report_use'));
+      assert.ok(expectedTools(mode, 15, 8).includes('report_use'));
+    }
+    assert.deepEqual(expectedTools('read-only', 15, 8, SAMPLE), ['read_ref_chunk', 'report_use', 'search']);
+    assert.deepEqual(expectedTools('read-only', 0, 8, SAMPLE), ['report_use']);
+    const real = loadToolRegistry().find((e) => e.name === 'report_use')!;
+    assert.equal(real.phase, 'cog-8');
+    assert.deepEqual([...real.modes].sort(), ['inbox', 'journal', 'read-only']);
   });
 
   it('rejects malformed registries', () => {
@@ -46,6 +62,10 @@ describe('tool registry fixture', () => {
       [{ name: 'x', modes: [], phase: 6 }],
       [{ name: 'x', modes: ['inbox', 'inbox'], phase: 6 }],
       [{ name: 'x', modes: ['inbox'], phase: 6.5 }],
+      [{ name: 'x', modes: ['inbox'], phase: 'cog-0' }],
+      [{ name: 'x', modes: ['inbox'], phase: 'cog-8x' }],
+      [{ name: 'x', modes: ['inbox'], phase: 'cog8' }],
+      [{ name: 'x', modes: ['inbox'], phase: '8' }],
       [{ name: 'Bad-Name', modes: ['inbox'], phase: 6 }],
       [{ name: 'x', modes: ['inbox'], phase: 6 }, { name: 'x', modes: ['journal'], phase: 9 }],
     ];

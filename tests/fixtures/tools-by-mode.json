@@ -7,5 +7,6 @@
   { "name": "list_inbox", "modes": ["inbox"], "phase": 8 },
   { "name": "journal_append", "modes": ["journal"], "phase": 9 },
   { "name": "journal_list", "modes": ["journal"], "phase": 9 },
-  { "name": "read_ref_chunk", "modes": ["inbox", "journal", "read-only"], "phase": 11 }
+  { "name": "read_ref_chunk", "modes": ["inbox", "journal", "read-only"], "phase": 11 },
+  { "name": "report_use", "modes": ["inbox", "journal", "read-only"], "phase": "cog-8" }
 ]

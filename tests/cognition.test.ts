@@ -779,7 +779,7 @@ describe('MCP: no job, review, or accept tools; capture and journal_append refus
       const rt = createMcpRuntime({ config: inst.config, configPath: inst.configPath });
       try {
         const names = listTools(mode, rt.ctx.registry).map((t) => t.name).sort();
-        assert.deepEqual(names, expectedTools(mode, 99));
+        assert.deepEqual(names, expectedTools(mode, 99, 99));
         for (const n of names) assert.ok(!COGNITION_NAMES.test(n), n);
       } finally {
         rt.close();

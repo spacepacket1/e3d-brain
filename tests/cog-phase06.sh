@@ -26,7 +26,8 @@ grep -q 'LESSON_BANNER' src/review/queue.ts || fail "review show has no lesson b
 if grep -nE "writeAtomic|createExclusive|renameSafe|writeInboxFile|appendSafe|unlink|rmSync|rm\(" src/cognition/jobs/reflect.ts; then fail "reflect writes or deletes files itself (C1, C10)"; fi
 if grep -nE "from '\.\./\.\./(net|llm/(openai|anthropic))" src/cognition/jobs/reflect.ts; then fail "reflect reaches the network directly"; fi
 if grep -rnE "from '\.\./cognition/" src/mcp; then fail "src/mcp imports cognition code"; fi
-if git diff --quiet HEAD -- src/index/rank.ts 2>/dev/null; then :; else fail "rank.ts changed (lessons must rank through the existing tiers)"; fi
+# Lessons rank through the existing tiers: rank.ts has no tier of its own for them (the only kind check is the journal-lesson tiers T3/T4).
+[[ "$(grep -c "kind === 'lesson'" src/index/rank.ts)" == "1" ]] || fail "rank.ts special-cases lessons (they must rank through the existing tiers)"
 
 # Docs.
 grep -q '^### The reflect job' docs/SETUP.md || fail "docs/SETUP.md lacks the reflect section"

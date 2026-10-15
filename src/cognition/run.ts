@@ -56,6 +56,8 @@ export interface Draft {
   targets: ProposalTarget[];
   evidence: string[];
   ops: ChangeOp[];
+  /** What the proposal key is computed over instead of `evidence`, for proposals that cite nothing (a `gap` keys on its cluster hash). */
+  key_basis?: string[];
   untrusted_origin?: boolean;
   taint_sources?: string[];
   needs_review?: NeedsReview;
@@ -102,8 +104,8 @@ export interface CognitionJob {
   description: string;
   /** Whether the job can use a model: `never`, `optional` (works without one), or `required`. */
   llm: 'never' | 'optional' | 'required';
-  /** `required`: the run refuses to start (creating nothing) without a configured evidence source. */
-  evidence?: 'required';
+  /** `required`: the run refuses to start (creating nothing) without a configured evidence source. `optional`: the source is passed in when one is configured (never refuses). */
+  evidence?: 'required' | 'optional';
   generate(ctx: JobContext): Promise<JobOutput>;
 }
 
@@ -273,7 +275,7 @@ export async function runJob(opts: RunOptions): Promise<RunResult> {
       const rejected = rejectedKeys(stateDir);
       let stop: string | undefined;
       for (const d of out.drafts) {
-        const key = proposalKey(job.name, d.proposal_type, d.evidence);
+        const key = proposalKey(job.name, d.proposal_type, d.key_basis ?? d.evidence);
         if (state.keys.has(key)) {
           count('duplicates');
           continue;

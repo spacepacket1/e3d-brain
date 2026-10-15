@@ -103,7 +103,7 @@ describe('ebrain mcp: inbox tools by mode', () => {
 
   it('the registry has no accept/delete/move/overwrite tool in any mode', () => {
     for (const e of loadToolRegistry()) assert.ok(!/accept|promote|edit|delete|move|overwrite/.test(e.name), e.name);
-    for (const mode of TOOL_MODES) for (const n of expectedTools(mode, 15)) assert.ok(!FORBIDDEN_TOOL_NAME.test(n), n);
+    for (const mode of TOOL_MODES) for (const n of expectedTools(mode, 15, 99)) assert.ok(!FORBIDDEN_TOOL_NAME.test(n), n);
   });
 });
 

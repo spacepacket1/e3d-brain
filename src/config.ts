@@ -34,6 +34,8 @@ export interface Config {
   hooks: HooksConfig;
   llm: LlmConfig;
   recallLog: RecallLogConfig;
+  queryLog: QueryLogConfig;
+  rank: RankConfig;
   inbox: InboxConfig;
   cognition: CognitionConfig;
   evidence: EvidenceConfig;
@@ -69,6 +71,17 @@ export interface CognitionConfig {
   consolidate: ConsolidateConfig;
   reflect: ReflectConfig;
   forget: ForgetConfig;
+  gaps: GapsConfig;
+}
+
+/** The `gaps` job's cluster thresholds (cognition Phase 8). */
+export interface GapsConfig {
+  /** A cluster becomes a gap proposal only when it was asked at least this many times. */
+  minQueries: number;
+  /** ... and at least this fraction of those queries had a poor result (none, or best tier T6 or lower). */
+  minPoorRate: number;
+  /** Two normalized query token sets are the same cluster when their Jaccard similarity is at least this. */
+  minSimilarity: number;
 }
 
 /** The `forget` job's candidate rules (cognition Phase 7). */
@@ -112,6 +125,19 @@ export interface SupersedeConfig {
 /** `<stateDir>/recalls.jsonl` (cognition Phase 1): records older than this are dropped by `ebrain recalls prune`. */
 export interface RecallLogConfig {
   retentionDays: number;
+}
+
+/** `<stateDir>/queries.jsonl` (cognition Phase 8): opt-in, scrubbed search queries for the `gaps` job. */
+export interface QueryLogConfig {
+  enabled: boolean;
+  /** `ebrain queries prune` drops records older than this. */
+  retentionDays: number;
+}
+
+/** Ranking options (cognition Phase 8). */
+export interface RankConfig {
+  /** Nudge `search` results by evidence-linked usage (at most one position within a tier). Off by default: ordering is then a pure function of vault and config (I11). */
+  usageBoost: boolean;
 }
 
 /**
@@ -204,6 +230,8 @@ const MAX_AUDIT_SEGMENT_MB = 4096;
 export const DEFAULT_JOURNAL: Readonly<JournalConfig> = { ttlDays: 90, maxEntryChars: 4000, maxEntriesPerHour: 60, maxTotalMB: 100, pruneRequiresReview: false };
 export const DEFAULT_REFS: Readonly<RefsConfig> = { excerptChars: 400, maxHits: 5 };
 export const DEFAULT_RECALL_RETENTION_DAYS = 180;
+export const DEFAULT_QUERY_RETENTION_DAYS = 30;
+export const DEFAULT_GAPS: Readonly<GapsConfig> = { minQueries: 3, minPoorRate: 0.5, minSimilarity: 0.5 };
 export const DEFAULT_MAX_PENDING_PROPOSALS = 50;
 export const DEFAULT_MAX_PROPOSALS_PER_RUN = 20;
 export const DEFAULT_SUPERSEDE_MIN_JACCARD = 0.5;
@@ -338,7 +366,7 @@ function isInsideLexical(parent: string, child: string): boolean {
 export function parseConfig(raw: unknown, opts: { homeDir?: string } = {}): Config {
   const home = opts.homeDir ?? os.homedir();
   if (!isObject(raw)) throw new ConfigError('config must be a JSON object');
-  checkKeys(raw, ['vaultPath', 'stateDir', 'principal', 'mode', 'limits', 'network', 'scrub', 'embeddings', 'audit', 'journal', 'refs', 'hooks', 'llm', 'recallLog', 'inbox', 'cognition', 'evidence'], '');
+  checkKeys(raw, ['vaultPath', 'stateDir', 'principal', 'mode', 'limits', 'network', 'scrub', 'embeddings', 'audit', 'journal', 'refs', 'hooks', 'llm', 'recallLog', 'queryLog', 'rank', 'inbox', 'cognition', 'evidence'], '');
 
   const vaultPath = expandHome(requiredStr(raw, 'vaultPath', 'vaultPath'), 'vaultPath', home);
   const stateDir = expandHome(str(raw, 'stateDir', 'stateDir') ?? DEFAULT_STATE_DIR, 'stateDir', home);
@@ -455,6 +483,15 @@ export function parseConfig(raw: unknown, opts: { homeDir?: string } = {}): Conf
     throw new ConfigError('config key "recallLog.retentionDays" must be an integer from 1 to 36500');
   }
 
+  const queryRaw = section(raw, 'queryLog', ['enabled', 'retentionDays'], false);
+  if (queryRaw.enabled !== undefined && typeof queryRaw.enabled !== 'boolean') throw new ConfigError('config key "queryLog.enabled" must be true or false');
+  const queryRetention = queryRaw.retentionDays === undefined ? DEFAULT_QUERY_RETENTION_DAYS : queryRaw.retentionDays;
+  if (typeof queryRetention !== 'number' || !Number.isInteger(queryRetention) || queryRetention < 1 || queryRetention > 36_500) {
+    throw new ConfigError('config key "queryLog.retentionDays" must be an integer from 1 to 36500');
+  }
+  const rankRaw = section(raw, 'rank', ['usageBoost'], false);
+  if (rankRaw.usageBoost !== undefined && typeof rankRaw.usageBoost !== 'boolean') throw new ConfigError('config key "rank.usageBoost" must be true or false');
+
   const countKey = (raw: Json, label: string, key: string, def: number): number => {
     const v = raw[key] === undefined ? def : raw[key];
     if (typeof v !== 'number' || !Number.isInteger(v) || v < 1 || v > MAX_PROPOSALS_CEILING) {
@@ -463,7 +500,7 @@ export function parseConfig(raw: unknown, opts: { homeDir?: string } = {}): Conf
     return v;
   };
   const inboxRaw = section(raw, 'inbox', ['maxPendingProposals'], false);
-  const cognitionRaw = section(raw, 'cognition', ['maxProposalsPerRun', 'supersede', 'consolidate', 'reflect', 'forget'], false);
+  const cognitionRaw = section(raw, 'cognition', ['maxProposalsPerRun', 'supersede', 'consolidate', 'reflect', 'forget', 'gaps'], false);
   const supersedeRaw: Json = cognitionRaw.supersede === undefined ? {} : (cognitionRaw.supersede as Json);
   if (!isObject(supersedeRaw)) throw new ConfigError('config key "cognition.supersede" must be an object');
   checkKeys(supersedeRaw, ['minJaccard', 'maxUnadjudicated'], 'cognition.supersede.');
@@ -502,6 +539,14 @@ export function parseConfig(raw: unknown, opts: { homeDir?: string } = {}): Conf
     if (typeof v !== 'number' || !Number.isInteger(v) || v < 1 || v > 36_500) throw new ConfigError(`config key "cognition.forget.${key}" must be an integer from 1 to 36500`);
     return v;
   };
+  const gapsRaw: Json = cognitionRaw.gaps === undefined ? {} : (cognitionRaw.gaps as Json);
+  if (!isObject(gapsRaw)) throw new ConfigError('config key "cognition.gaps" must be an object');
+  checkKeys(gapsRaw, ['minQueries', 'minPoorRate', 'minSimilarity'], 'cognition.gaps.');
+  const gapsFraction = (key: 'minPoorRate' | 'minSimilarity'): number => {
+    const v = gapsRaw[key] === undefined ? DEFAULT_GAPS[key] : gapsRaw[key];
+    if (typeof v !== 'number' || !(v > 0) || v > 1) throw new ConfigError(`config key "cognition.gaps.${key}" must be a number above 0 and at most 1`);
+    return v;
+  };
   const exemptRaw = forgetRaw.exemptKinds === undefined ? DEFAULT_FORGET.exemptKinds : forgetRaw.exemptKinds;
   if (!Array.isArray(exemptRaw) || exemptRaw.length > 100 || exemptRaw.some((k) => typeof k !== 'string' || !/^[a-z][a-z0-9_-]{0,63}$/.test(k))) {
     throw new ConfigError('config key "cognition.forget.exemptKinds" must be an array of lowercase kind names');
@@ -522,6 +567,8 @@ export function parseConfig(raw: unknown, opts: { homeDir?: string } = {}): Conf
     hooks,
     llm,
     recallLog: { retentionDays },
+    queryLog: { enabled: queryRaw.enabled === true, retentionDays: queryRetention },
+    rank: { usageBoost: rankRaw.usageBoost === true },
     inbox: { maxPendingProposals: countKey(inboxRaw, 'inbox.maxPendingProposals', 'maxPendingProposals', DEFAULT_MAX_PENDING_PROPOSALS) },
     cognition: {
       maxProposalsPerRun: countKey(cognitionRaw, 'cognition.maxProposalsPerRun', 'maxProposalsPerRun', DEFAULT_MAX_PROPOSALS_PER_RUN),
@@ -535,6 +582,11 @@ export function parseConfig(raw: unknown, opts: { homeDir?: string } = {}): Conf
         maxSummaries: countKey(consolidateRaw, 'cognition.consolidate.maxSummaries', 'maxSummaries', DEFAULT_CONSOLIDATE.maxSummaries),
       },
       reflect: { maxLessons, minDuplicateJaccard: minDup, decisions },
+      gaps: {
+        minQueries: countKey(gapsRaw, 'cognition.gaps.minQueries', 'minQueries', DEFAULT_GAPS.minQueries),
+        minPoorRate: gapsFraction('minPoorRate'),
+        minSimilarity: gapsFraction('minSimilarity'),
+      },
       forget: { windowDays: dayKey('windowDays'), minAgeDays: dayKey('minAgeDays'), exemptKinds: [...new Set(exemptRaw as string[])] },
     },
     evidence: parseEvidence(section(raw, 'evidence', ['dir', 'sources', 'maxFileMB', 'maxRecordBytes'], false), vaultPath, stateDir, home),

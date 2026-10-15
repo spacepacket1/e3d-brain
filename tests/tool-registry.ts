@@ -2,7 +2,12 @@
 // single source of truth for tool names (Phase 4). Each entry is
 // {name, modes, phase}; every phase's tool-list assertion calls
 // expectedTools(mode, <that phase's number>) instead of hardcoding a list, and
-// a phase that adds a tool adds its entry in the same change.
+// a phase that adds a tool adds its entry in the same change. A memory phase
+// is a number (1-15); a cognition phase is namespaced, `cog-<n>`, so the two
+// numbering schemes never collide: expectedTools(mode, memoryPhase,
+// cognitionPhase) counts memory entries up to the first and cognition
+// entries up to the second (default 0: none), and a memory-phase assertion
+// therefore never includes a cognition tool.
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -14,8 +19,20 @@ export const TOOL_MODES: readonly ToolMode[] = ['inbox', 'journal', 'read-only']
 export interface ToolEntry {
   name: string;
   modes: ToolMode[];
-  /** The phase that introduces the tool. */
-  phase: number;
+  /** The phase that introduces the tool: a memory phase number, or `cog-<n>` for a cognition phase. */
+  phase: number | string;
+}
+
+const COG_PHASE_RE = /^cog-([1-9][0-9]?)$/;
+
+/** Memory phase number of an entry, or undefined for a cognition entry. */
+export function memoryPhaseOf(e: ToolEntry): number | undefined {
+  return typeof e.phase === 'number' ? e.phase : undefined;
+}
+
+/** Cognition phase number of an entry, or undefined for a memory entry. */
+export function cognitionPhaseOf(e: ToolEntry): number | undefined {
+  return typeof e.phase === 'string' ? Number(COG_PHASE_RE.exec(e.phase)![1]) : undefined;
 }
 
 /** Parse and validate a registry (fails on unknown keys, bad modes, duplicates). */
@@ -35,8 +52,9 @@ export function parseToolRegistry(raw: unknown): ToolEntry[] {
       throw new Error(`tool "${name}": bad modes`);
     }
     if (new Set(modes).size !== modes.length) throw new Error(`tool "${name}": duplicate modes`);
-    if (typeof phase !== 'number' || !Number.isInteger(phase) || phase < 1 || phase > 15) throw new Error(`tool "${name}": bad phase`);
-    return { name, modes: modes as ToolMode[], phase };
+    const memory = typeof phase === 'number' && Number.isInteger(phase) && phase >= 1 && phase <= 15;
+    if (!memory && !(typeof phase === 'string' && COG_PHASE_RE.test(phase))) throw new Error(`tool "${name}": bad phase`);
+    return { name, modes: modes as ToolMode[], phase: phase as number | string };
   });
 }
 
@@ -45,24 +63,40 @@ export function loadToolRegistry(): ToolEntry[] {
   return parseToolRegistry(JSON.parse(fs.readFileSync(file, 'utf8')) as unknown);
 }
 
-/** Tool names expected in `mode` once phases 1..upToPhase are in place, sorted bytewise. */
-export function expectedTools(mode: ToolMode, upToPhase: number, entries: readonly ToolEntry[] = loadToolRegistry()): string[] {
+/**
+ * Tool names expected in `mode` once memory phases 1..upToMemoryPhase and
+ * cognition phases 1..upToCognitionPhase (default 0: none) are in place,
+ * sorted bytewise.
+ */
+export function expectedTools(
+  mode: ToolMode,
+  upToMemoryPhase: number,
+  upToCognitionPhase = 0,
+  entries: readonly ToolEntry[] = loadToolRegistry(),
+): string[] {
   return entries
-    .filter((e) => e.phase <= upToPhase && e.modes.includes(mode))
+    .filter((e) => {
+      const m = memoryPhaseOf(e);
+      const c = cognitionPhaseOf(e);
+      return (m !== undefined && m <= upToMemoryPhase) || (c !== undefined && c <= upToCognitionPhase);
+    })
+    .filter((e) => e.modes.includes(mode))
     .map((e) => e.name)
     .sort();
 }
 
 /**
- * For an earlier phase's tool-list test once later phases have added tools:
- * `listed` includes every tool of phases 1..phase for `mode`, and anything
- * else it lists is a later-phase registry tool of that mode. Returns a
- * problem description, or undefined.
+ * For an earlier memory phase's tool-list test once later phases have added
+ * tools: `listed` includes every tool of memory phases 1..phase for `mode`,
+ * and anything else it lists is a later registry tool of that mode (a later
+ * memory phase, or any cognition phase). Returns a problem description, or
+ * undefined.
  */
 export function checkToolsSincePhase(listed: readonly string[], mode: ToolMode, phase: number, entries: readonly ToolEntry[] = loadToolRegistry()): string | undefined {
-  const missing = expectedTools(mode, phase, entries).filter((n) => !listed.includes(n));
+  const expected = expectedTools(mode, phase, 0, entries);
+  const missing = expected.filter((n) => !listed.includes(n));
   if (missing.length > 0) return `missing phase-${phase} tools: ${missing.join(', ')}`;
-  const later = new Set(entries.filter((e) => e.phase > phase && e.modes.includes(mode)).map((e) => e.name));
-  const stray = listed.filter((n) => !expectedTools(mode, phase, entries).includes(n) && !later.has(n));
+  const later = new Set(entries.filter((e) => !expected.includes(e.name) && e.modes.includes(mode)).map((e) => e.name));
+  const stray = listed.filter((n) => !expected.includes(n) && !later.has(n));
   return stray.length > 0 ? `tools not in the registry for ${mode}: ${stray.join(', ')}` : undefined;
 }

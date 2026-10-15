@@ -19,7 +19,7 @@ import { ConfigError, loadConfig } from '../config.js';
 import { runMcpServer } from '../mcp/server.js';
 import { DEFAULT_HTTP_PORT, startHttpServer } from '../net/http-server.js';
 import { runToken } from './token-command.js';
-import { runIds, runRecalls, runUndo } from './undo-commands.js';
+import { runIds, runQueries, runRecalls, runUndo } from './undo-commands.js';
 import { VERSION } from '../version.js';
 
 const USAGE = `usage: ebrain <command>
@@ -85,6 +85,8 @@ commands:
                     record to <stateDir>/runs/ (one run per job at a time; never applies anything)
   cognition runs [-n <count>]
                     list run records
+  cognition stats forget | usage
+                    print forget candidates, or the per-note usage rollup (writes nothing to the vault)
   review list       list typed proposals waiting in _inbox/ (with authentication and taint)
   review show <id> | review diff <id>
                     print a proposal and the exact change against current note contents
@@ -101,6 +103,8 @@ commands:
   evidence reindex  rebuild <stateDir>/evidence.db from the evidence files
   recalls prune [--older-than <days>]
                     drop recall records older than recallLog.retentionDays (default 180) from <stateDir>/recalls.jsonl
+  queries prune [--older-than <days>]
+                    drop logged queries older than queryLog.retentionDays (default 30) from <stateDir>/queries.jsonl
   scrub <file|-> [--strict] [--entropy-threshold <bits>]
                     print the text with secrets redacted; finding counts go to stderr
                     (--strict: agent rules, reject on any credential and exit 3)
@@ -225,6 +229,8 @@ export function main(argv: readonly string[]): number | Promise<number> {
       return emit(runUndo(rest));
     case 'recalls':
       return emit(runRecalls(rest));
+    case 'queries':
+      return emit(runQueries(rest));
     case 'init':
       return runInitCommand(rest);
     case 'mcp':

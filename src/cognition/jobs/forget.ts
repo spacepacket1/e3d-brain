@@ -20,6 +20,13 @@
 // record, or one that starts inside the window, a never-recalled note is not
 // a candidate (counted as `skipped_no_history`).
 //
+// Usage (cognition Phase 8): `note_usage` is rebuilt too, and each candidate's
+// `reported_used` and evidence-linked good/bad counts are shown. A note whose
+// evidence-linked good count exceeds its bad count is skipped
+// (`skipped_evidence_useful`): a recorded good outcome beats staleness.
+// Self-reported use is shown but never gates anything (an agent can claim it).
+// Evidence is optional; without it nothing is evidence-linked.
+//
 // Ladder: an accepted note gets a `demote` proposal; a note already `stale`
 // that still meets every rule gets an `archive` proposal (status `archived`,
 // `archived_at`, move to `archiveDestination`).
@@ -41,6 +48,8 @@ import type { IndexHandle } from '../../index/indexer.js';
 import { allNoteRows, type NoteRow } from '../../index/query.js';
 import { isoToMs } from '../../mcp/tools.js';
 import { rebuildNoteStats, trackingStart } from '../../recall/stats.js';
+import { rebuildNoteUsage } from '../../recall/usage-rollup.js';
+import type { EvidenceSource } from '../../evidence/source.js';
 import { archiveDestination, type ChangeOp } from '../../review/proposal.js';
 import type { SafePath } from '../../safe-path.js';
 import { compareBytes } from '../../vault/names.js';
@@ -58,6 +67,10 @@ export interface ForgetSignals {
   /** Linked notes (either direction) that are superseded or archived. */
   linkedInactive: number;
   expires: string | null;
+  /** From `note_usage` (cognition Phase 8). */
+  reportedUsed: number;
+  evidenceGood: number;
+  evidenceBad: number;
 }
 
 export interface ForgetCandidate {
@@ -83,6 +96,8 @@ export interface ForgetInput {
   now: Date;
   /** Expired journal entries only (`ebrain journal prune` with review). */
   journalOnly?: boolean;
+  /** Local evidence for the usage rollup (cognition Phase 8); without it no use is evidence-linked. */
+  evidence?: EvidenceSource;
 }
 
 /** Compute the candidates and the skip counts. Rebuilds `note_stats` first. */
@@ -93,6 +108,7 @@ export function analyzeForget(input: ForgetInput): ForgetAnalysis {
   const counts: Record<string, number> = {};
   const count = (k: string): void => void (counts[k] = (counts[k] ?? 0) + 1);
   rebuildNoteStats(db, stateDir);
+  const usage = new Map(rebuildNoteUsage(db, stateDir, input.evidence).map((u) => [u.id, u]));
   const start = trackingStart(db);
   const startMs = start === undefined ? undefined : Date.parse(start);
   const { windowDays, minAgeDays, exemptKinds } = config.cognition.forget;
@@ -121,6 +137,9 @@ export function analyzeForget(input: ForgetInput): ForgetAnalysis {
       lastRecalled: st?.last_recalled ?? null,
       linkedInactive: [...(linked.get(r.path) ?? [])].filter((p) => inactive.has(p)).length,
       expires: r.expires,
+      reportedUsed: usage.get(r.id)?.reported_used ?? 0,
+      evidenceGood: usage.get(r.id)?.evidence_linked_good ?? 0,
+      evidenceBad: usage.get(r.id)?.evidence_linked_bad ?? 0,
     };
   };
 
@@ -172,6 +191,10 @@ export function analyzeForget(input: ForgetInput): ForgetAnalysis {
       count('skipped_cited');
       continue;
     }
+    if (signals.evidenceGood > signals.evidenceBad) {
+      count('skipped_evidence_useful');
+      continue;
+    }
     quiet.push({ row: r, action: r.status === 'stale' ? 'archive' : 'demote', signals, expiredJournal: false, cite: formatCitation({ kind: 'note', id: r.id, rev: r.rev }) });
   }
   journal.sort((a, b) => compareBytes(a.row.expires ?? '', b.row.expires ?? '') || compareBytes(a.row.path, b.row.path));
@@ -194,6 +217,9 @@ export function describeSignals(s: ForgetSignals): string {
     `last recalled ${s.lastRecalled === null ? 'never' : s.lastRecalled.slice(0, 10)}`,
     `${s.linkedInactive} linked note(s) superseded or archived`,
     ...(s.expires === null ? [] : [`expires ${s.expires}`]),
+    ...(s.reportedUsed + s.evidenceGood + s.evidenceBad === 0
+      ? []
+      : [`reported used ${s.reportedUsed} (self-reported); evidence-linked ${s.evidenceGood} good, ${s.evidenceBad} bad`]),
   ].join('; ');
 }
 
@@ -240,7 +266,7 @@ function draftOf(c: ForgetCandidate, now: Date, windowDays: number): Draft {
 
 function generateWith(journalOnly: boolean): (ctx: JobContext) => Promise<JobOutput> {
   return (ctx) => {
-    const a = analyzeForget({ config: ctx.config, index: ctx.index, stateDir: ctx.stateDir, now: ctx.now, journalOnly });
+    const a = analyzeForget({ config: ctx.config, index: ctx.index, stateDir: ctx.stateDir, now: ctx.now, journalOnly, ...(ctx.evidence === undefined ? {} : { evidence: ctx.evidence }) });
     for (const [k, n] of Object.entries(a.counts)) ctx.count(k, n);
     ctx.count('candidates', a.candidates.length);
     const drafts: Draft[] = [];
@@ -257,6 +283,7 @@ export const FORGET_JOB: CognitionJob = {
   version: 1,
   description: 'propose demoting (status: stale) or archiving notes with no recent recall; never deletes (no model)',
   llm: 'never',
+  evidence: 'optional',
   generate: generateWith(false),
 };
 
