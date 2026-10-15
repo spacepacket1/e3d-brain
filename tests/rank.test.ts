@@ -205,6 +205,8 @@ const ORDER_ALLOWED: Record<string, string> = {
   'src/refs/db.ts': 'refs list in title order; chunk navigation in (chapter, ordinal) reading order',
   'src/refs/library.ts': 'refs reindex candidates in ref id order',
   'src/propose/archive-reader.ts': 'archive notes in path order (deterministic provider request order)',
+  'src/undo/store.ts': 'undo operations newest first (ULID order); ops reversed in reverse order',
+  'src/ids/assign.ts': 'notes lacking an id in listing order (deterministic assignment order)',
 };
 const ORDER_PATTERNS = [/\.sort\s*\(/, /\.toSorted\s*\(/, /\.reverse\s*\(/, /\.toReversed\s*\(/, /\bORDER\s+BY\b/i];
 const RELEVANCE_ORDER = /\bORDER\s+BY\b[^;`'"]*\b(?:bm25|rank|score|relevance)\b/i;

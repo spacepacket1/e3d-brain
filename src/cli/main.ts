@@ -16,6 +16,7 @@ import { ConfigError, loadConfig } from '../config.js';
 import { runMcpServer } from '../mcp/server.js';
 import { DEFAULT_HTTP_PORT, startHttpServer } from '../net/http-server.js';
 import { runToken } from './token-command.js';
+import { runIds, runRecalls, runUndo } from './undo-commands.js';
 import { VERSION } from '../version.js';
 
 const USAGE = `usage: ebrain <command>
@@ -70,6 +71,14 @@ commands:
   propose [--since <date>] [--source <source|archive-id>] [--i-understand-data-leaves-machine]
                     extract candidate notes (decisions, preferences, lessons, ideas) from the raw archive
                     into _inbox/ with turn citations (needs llm.provider, mode inbox, human principal)
+  ids assign [--folder <f>] [--dry-run]
+                    add a ULID id: (and schema: 1) to notes lacking an id; other bytes unchanged;
+                    one undo operation (the old provisional id stays an alias until reindex --full)
+  undo <operation-id>
+                    restore the files an owner command rewrote, created, or moved (refuses if any was edited since)
+  undo --list       list undo operations (machine-local, under <stateDir>/undo/)
+  recalls prune [--older-than <days>]
+                    drop recall records older than recallLog.retentionDays (default 180) from <stateDir>/recalls.jsonl
   scrub <file|-> [--strict] [--entropy-threshold <bits>]
                     print the text with secrets redacted; finding counts go to stderr
                     (--strict: agent rules, reject on any credential and exit 3)
@@ -182,6 +191,12 @@ export function main(argv: readonly string[]): number | Promise<number> {
       return runPropose(rest).then(emit);
     case 'token':
       return emit(runToken(rest));
+    case 'ids':
+      return emit(runIds(rest));
+    case 'undo':
+      return emit(runUndo(rest));
+    case 'recalls':
+      return emit(runRecalls(rest));
     case 'init':
       return runInitCommand(rest);
     case 'mcp':

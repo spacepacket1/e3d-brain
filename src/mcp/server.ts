@@ -8,6 +8,7 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { AuditLog, segmentBytes } from '../audit/audit.js';
+import { RecallLog } from '../recall/recalls.js';
 import { closeIndex, openIndex } from '../index/indexer.js';
 import { checkFts5 } from '../index/sqlite.js';
 import { ensureStateDir, type LoadedConfig } from '../config.js';
@@ -74,6 +75,7 @@ export function createMcpRuntime(loaded: LoadedConfig): McpRuntime {
     maxCharsPerCall: config.limits.maxCharsPerCall,
     registry,
     audit: new AuditLog(stateDir, { maxSegmentBytes: segmentBytes(config.audit.maxSegmentMB) }),
+    recalls: new RecallLog(stateDir),
   };
   return { ctx, toolCount: listTools(config.mode, registry).length, close: () => closeIndex(index) };
 }

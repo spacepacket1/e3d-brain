@@ -204,6 +204,7 @@ Optional keys may be omitted to take their defaults.
 | `llm.maxInputCharsPerRun` | no | `200000` | integer 1000-100000000; characters sent per run (prompt plus archive text) |
 | `llm.maxOutputTokens` | no | `2048` | integer 64-64000; completion size requested per call |
 | `llm.timeoutMs` | no | `120000` | integer 1000-600000; per-call timeout |
+| `recallLog.retentionDays` | no | `180` | integer 1-36500; `ebrain recalls prune` drops recall records older than this |
 
 Later phases add keys here in the same change that adds them to the schema.
 
@@ -226,8 +227,8 @@ over a private network), `ebrain mcp --http [--host <loopback>] [--port <n>]` se
 
 ## State directory
 
-`stateDir` holds derived and private data (index, audit log, the `propose` candidate-id ledger, hashed HTTP tokens, the reference
-library `refs.db`). It is created
+`stateDir` holds derived and private data (index, audit log, the recall record `recalls.jsonl`, the undo store `undo/`, the
+`propose` candidate-id ledger, hashed HTTP tokens, the reference library `refs.db`). It is created
 with mode `0700`; files the tool creates are `0600`. It is never synced
 between machines and never placed inside the vault.
 
@@ -268,7 +269,52 @@ line endings and a leading BOM normalized). `ebrain doctor` refreshes an
 existing index and reports duplicate explicit ids (an error: the later note in
 path order gets a provisional id), missing identities, unknown statuses,
 malformed frontmatter, and invalid dates. The index never writes ids into
-notes.
+notes; `ebrain ids assign` does, when you ask (next section).
+
+## Assigning ids and undo
+
+```bash
+ebrain ids assign --dry-run            # list the notes that would get an id; writes nothing
+ebrain ids assign [--folder notes]     # add a ULID id: (and schema: 1 if absent) to notes lacking an id
+ebrain undo --list                     # undo operations, newest first
+ebrain undo <operation-id>             # restore the files that operation changed
+```
+
+`ids assign` inserts `id: <ULID>` (and `schema: 1` when the note has no
+`schema` key) at the top of the frontmatter, or a new frontmatter block when
+there is none. No other byte changes: other keys, their order and comments,
+line endings, a leading BOM, and the body are kept exactly; each edit is
+checked by re-parsing before anything is written. Notes it skips (and lists):
+malformed frontmatter, frontmatter that is not a block mapping, an `id` key
+that is invalid or claimed by another note, and the raw archive (`_raw/`).
+After the run, the index keeps each old provisional id as an alias of the new
+id, so citations made with it still resolve (and report `stale`), until the
+next `ebrain reindex --full` (best effort; cite assigned ids). `pinned: true`
+is kept as written; nothing here acts on it.
+
+Every owner command that rewrites, creates, or moves vault files (today
+`ids assign`; the review queue later) is one **undo operation**: before
+writing, the originals are saved under `<stateDir>/undo/<operation-id>/`
+(`0600`, same relative paths) with a manifest of each file's raw SHA-256
+before and after. `ebrain undo <operation-id>` restores every file byte for
+byte, removes files the operation created, and moves moved files back. It
+refuses, changing nothing, when any affected file was edited (or removed)
+after the operation. The memory layer's `inbox accept/reject` do not use it.
+**Undo is machine-local**: the undo store lives in the state directory, never
+in the vault, so it is not in git or sync and another machine cannot undo your
+operation. Only one apply/undo runs at a time (`<stateDir>/locks/apply.lock`);
+an operation interrupted by a crash is rolled back by the next one.
+
+## Recall record
+
+Every read tool call (`search`, `read_note`, `list_notes`, `related`,
+`list_inbox`, `journal_list`, `read_ref_chunk`) appends one line to
+`<stateDir>/recalls.jsonl` (`0600`): `{recall_id, ts, principal, ids}`, where
+`ids` is the `{id, rev}` of up to 500 returned notes in result order (never
+note text or queries). The audit log is unchanged; later cognition jobs read
+this file, not the audit `returned` list (which may be truncated). Old
+records are dropped only when you run `ebrain recalls prune` (keeps
+`recallLog.retentionDays`, default 180; `--older-than <days>` overrides).
 
 **The state directory must be on a local filesystem**, not NFS, EFS, SMB, or
 another network filesystem: several processes (the CLI and any number of MCP

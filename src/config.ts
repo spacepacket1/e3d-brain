@@ -33,6 +33,12 @@ export interface Config {
   refs: RefsConfig;
   hooks: HooksConfig;
   llm: LlmConfig;
+  recallLog: RecallLogConfig;
+}
+
+/** `<stateDir>/recalls.jsonl` (cognition Phase 1): records older than this are dropped by `ebrain recalls prune`. */
+export interface RecallLogConfig {
+  retentionDays: number;
 }
 
 /**
@@ -122,6 +128,7 @@ export const DEFAULT_AUDIT_SEGMENT_MB = 50;
 const MAX_AUDIT_SEGMENT_MB = 4096;
 export const DEFAULT_JOURNAL: Readonly<JournalConfig> = { ttlDays: 90, maxEntryChars: 4000, maxEntriesPerHour: 60, maxTotalMB: 100 };
 export const DEFAULT_REFS: Readonly<RefsConfig> = { excerptChars: 400, maxHits: 5 };
+export const DEFAULT_RECALL_RETENTION_DAYS = 180;
 /** Upper bounds for `refs.*`: excerpts and hits stay short so a book cannot be dumped through `search`. */
 export const MAX_REF_EXCERPT_CHARS = 1000;
 export const MAX_REF_HITS = 20;
@@ -237,7 +244,7 @@ function isInsideLexical(parent: string, child: string): boolean {
 export function parseConfig(raw: unknown, opts: { homeDir?: string } = {}): Config {
   const home = opts.homeDir ?? os.homedir();
   if (!isObject(raw)) throw new ConfigError('config must be a JSON object');
-  checkKeys(raw, ['vaultPath', 'stateDir', 'principal', 'mode', 'limits', 'network', 'scrub', 'embeddings', 'audit', 'journal', 'refs', 'hooks', 'llm'], '');
+  checkKeys(raw, ['vaultPath', 'stateDir', 'principal', 'mode', 'limits', 'network', 'scrub', 'embeddings', 'audit', 'journal', 'refs', 'hooks', 'llm', 'recallLog'], '');
 
   const vaultPath = expandHome(requiredStr(raw, 'vaultPath', 'vaultPath'), 'vaultPath', home);
   const stateDir = expandHome(str(raw, 'stateDir', 'stateDir') ?? DEFAULT_STATE_DIR, 'stateDir', home);
@@ -345,6 +352,12 @@ export function parseConfig(raw: unknown, opts: { homeDir?: string } = {}): Conf
 
   const llm = parseLlm(section(raw, 'llm', ['provider', 'model', 'baseUrl', 'apiKeyEnv', 'maxCallsPerRun', 'maxInputCharsPerRun', 'maxOutputTokens', 'timeoutMs'], false), allowedHosts);
 
+  const recallRaw = section(raw, 'recallLog', ['retentionDays'], false);
+  const retentionDays = recallRaw.retentionDays === undefined ? DEFAULT_RECALL_RETENTION_DAYS : recallRaw.retentionDays;
+  if (typeof retentionDays !== 'number' || !Number.isInteger(retentionDays) || retentionDays < 1 || retentionDays > 36_500) {
+    throw new ConfigError('config key "recallLog.retentionDays" must be an integer from 1 to 36500');
+  }
+
   return {
     vaultPath,
     stateDir,
@@ -359,6 +372,7 @@ export function parseConfig(raw: unknown, opts: { homeDir?: string } = {}): Conf
     refs,
     hooks,
     llm,
+    recallLog: { retentionDays },
   };
 }
 

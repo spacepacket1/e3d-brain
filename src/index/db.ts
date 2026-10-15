@@ -12,11 +12,11 @@ export type Db = BetterSqlite3.Database;
 export const INDEX_FILE = 'index.db';
 export const BUSY_TIMEOUT_MS = 10000;
 /** Bump when the table layout changes: an index with another version is rebuilt. */
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 const TABLES = [
   'meta', 'notes', 'chunks', 'chunks_fts', 'links', 'tags', 'aliases', 'headings', 'problems', 'cites', 'note_revisions',
-  'missing_ids', 'chunk_vectors',
+  'missing_ids', 'id_aliases', 'chunk_vectors',
 ];
 
 const SCHEMA = `
@@ -117,6 +117,9 @@ CREATE TABLE note_revisions (id TEXT NOT NULL, rev TEXT NOT NULL, first_seen TEX
 CREATE TABLE missing_ids (
   id TEXT PRIMARY KEY, provisional INTEGER NOT NULL, last_path TEXT NOT NULL, last_rev TEXT NOT NULL, since TEXT NOT NULL
 ) STRICT;
+-- Provisional ids replaced by assigned ids (\`ebrain ids assign\`): alias -> id. Best effort; cleared by a full rebuild.
+CREATE TABLE id_aliases (alias TEXT PRIMARY KEY, id TEXT NOT NULL, since TEXT NOT NULL) STRICT;
+CREATE INDEX id_aliases_id ON id_aliases (id);
 -- Optional embeddings (Phase 12): one unit-length float32 vector per chunk, valid while chunk_rev and model match.
 CREATE TABLE chunk_vectors (
   note_path TEXT NOT NULL,

@@ -8,7 +8,10 @@
 //      the total size;
 //   5. converts a thrown ToolRejection into a structured MCP error, and any
 //      other exception into a generic one (never a stack trace);
-//   6. appends exactly one audit line per call to `ctx.audit` (Phase 5;
+//   6. for a read tool call (one whose result carries a `recall_id`),
+//      appends the recall record to `ctx.recalls` (cognition Phase 1;
+//      a failure turns the response into an error, like the audit);
+//   7. appends exactly one audit line per call to `ctx.audit` (Phase 5;
 //      rejected, invalid, and errored calls included; an audit write failure
 //      turns the response into an error, so no result leaves unaudited),
 //      then reports the DispatchRecord through `ctx.onRecord`.
@@ -21,6 +24,7 @@ import type { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { summarizeArgs, type AuditArgKinds, type AuditLog } from '../audit/audit.js';
 import type { Mode } from '../config.js';
+import type { RecallLog } from '../recall/recalls.js';
 import { MAX_CHARS_CEILING } from '../config.js';
 import { fence, truncateText } from './fence.js';
 import { assertToolSchema, validate, type ObjectSchema } from './schema.js';
@@ -180,11 +184,15 @@ export interface DispatchContext {
   registry?: ToolRegistry;
   /** The audit log; the MCP server always sets it (Phase 5). */
   audit?: AuditLog;
+  /** `<stateDir>/recalls.jsonl`; the MCP server always sets it (cognition Phase 1). */
+  recalls?: RecallLog;
   onRecord?: (record: DispatchRecord) => void;
 }
 
 /** Detail returned when the audit line could not be written. */
 export const AUDIT_FAILURE_DETAIL = 'audit log unavailable';
+/** Detail returned when the recall record could not be written. */
+export const RECALL_FAILURE_DETAIL = 'recall log unavailable';
 
 /** The MCP `tools/call` result shape. */
 export interface ToolCallResponse {
@@ -309,6 +317,13 @@ export async function dispatch(ctx: DispatchContext, name: unknown, rawArgs: unk
   if (count !== undefined) record.result_count = count;
   if (result.recall_id !== undefined) record.recall_id = result.recall_id;
   if (result.returned !== undefined) record.returned = result.returned.map((r) => ({ id: r.id, rev: r.rev }));
+  if (result.recall_id !== undefined && ctx.recalls !== undefined) {
+    try {
+      ctx.recalls.append({ recall_id: result.recall_id, principal: ctx.principal.id, ids: record.returned ?? [] });
+    } catch {
+      return fail('error', 'internal', RECALL_FAILURE_DETAIL, valid);
+    }
+  }
   return finish(record, response);
 }
 

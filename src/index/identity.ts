@@ -7,9 +7,12 @@
 // is the frontmatter `id` when it is valid and the first note in path order
 // to claim it; otherwise it is the `prov_id` (`provisional = 1`). A `prov_`
 // id keeps resolving to its note after the note gains an explicit id, so
-// citations made before `ids assign` report `stale`, not `missing`.
+// citations made before `ids assign` report `stale`, not `missing`. `ids
+// assign` also records each replaced provisional id in `id_aliases`, so it
+// keeps resolving even after the note is later renamed and edited, until
+// a full rebuild.
 //
-// Provisional ids, `missing_ids` (rename history), and provisional rows of
+// Provisional ids, `missing_ids` (rename history), `id_aliases`, and provisional rows of
 // `note_revisions` are best-effort: a full rebuild re-derives them from the
 // current vault, and `ebrain index dump` leaves them out (I11).
 
@@ -134,20 +137,43 @@ export function finishIdentities(db: Db, before: IdSnapshot | undefined, now: st
   rebuildCites(db);
   db.prepare('INSERT OR IGNORE INTO note_revisions (id, rev, first_seen) SELECT id, rev, ? FROM notes').run(now);
   if (before !== undefined) {
-    const present = db.prepare('SELECT 1 FROM notes WHERE id = ? OR prov_id = ?');
+    const present = db.prepare(
+      'SELECT 1 FROM notes WHERE id = ? OR prov_id = ? OR id IN (SELECT id FROM id_aliases WHERE alias = ?)',
+    );
     const record = db.prepare(
       'INSERT OR REPLACE INTO missing_ids (id, provisional, last_path, last_rev, since) VALUES (?, ?, ?, ?, ?)',
     );
     for (const [id, info] of before) {
-      if (present.get(id, id) === undefined) record.run(id, info.provisional ? 1 : 0, info.path, info.rev, now);
+      if (present.get(id, id, id) === undefined) record.run(id, info.provisional ? 1 : 0, info.path, info.rev, now);
     }
   }
   db.exec('DELETE FROM missing_ids WHERE id IN (SELECT id FROM notes) OR id IN (SELECT prov_id FROM notes)');
+  db.exec('DELETE FROM missing_ids WHERE id IN (SELECT a.alias FROM id_aliases a JOIN notes n ON n.id = a.id)');
+}
+
+/**
+ * Record that each provisional id now names the note with the assigned id
+ * (`ebrain ids assign`). Pairs whose assigned id is not indexed are ignored.
+ */
+export function recordIdAliases(db: Db, pairs: readonly { alias: string; id: string }[], now: string): number {
+  const exists = db.prepare('SELECT 1 FROM notes WHERE id = ? AND provisional = 0');
+  const insert = db.prepare('INSERT OR REPLACE INTO id_aliases (alias, id, since) VALUES (?, ?, ?)');
+  let n = 0;
+  db.transaction(() => {
+    for (const p of pairs) {
+      if (!isProvisionalId(p.alias) || isProvisionalId(p.id) || exists.get(p.id) === undefined) continue;
+      insert.run(p.alias, p.id, now);
+      n++;
+    }
+    db.exec('DELETE FROM missing_ids WHERE id IN (SELECT a.alias FROM id_aliases a JOIN notes n ON n.id = a.id)');
+  }).immediate();
+  return n;
 }
 
 /** Forget best-effort identity history before a full rebuild. Explicit-id revisions are kept. */
 export function clearIdentityHistory(db: Db): void {
   db.exec('DELETE FROM missing_ids');
+  db.exec('DELETE FROM id_aliases');
   db.exec('DELETE FROM cites');
   db.prepare("DELETE FROM note_revisions WHERE id LIKE ? ESCAPE '\\'").run(`${PROVISIONAL_PREFIX.replace(/_/g, '\\_')}%`);
 }
@@ -174,16 +200,27 @@ function idColumn(id: string): 'id' | 'prov_id' {
   return isProvisionalId(id) ? 'prov_id' : 'id';
 }
 
+/**
+ * Rows for an id: explicit ids by `id`; `prov_` ids by `prov_id`, then
+ * through `id_aliases` to the assigned id that replaced them.
+ */
+function noteSql(cols: string, id: string): string {
+  return idColumn(id) === 'id'
+    ? `SELECT ${cols} FROM notes WHERE id = @id`
+    : `SELECT ${cols} FROM (SELECT ${cols}, 0 AS via FROM notes WHERE prov_id = @id UNION ALL ` +
+        `SELECT ${cols}, 1 AS via FROM notes WHERE provisional = 0 AND id = (SELECT id FROM id_aliases WHERE alias = @id)) ORDER BY via LIMIT 1`;
+}
+
 /** The note `id` refers to; its current `id` may differ when a provisional id was superseded by an explicit one. */
 export function noteIdentityById(db: Db, id: string): NoteIdentity | undefined {
-  return toIdentity(db.prepare(`SELECT path, id, provisional, rev FROM notes WHERE ${idColumn(id)} = ?`).get(id) as never);
+  return toIdentity(db.prepare(noteSql('path, id, provisional, rev', id)).get({ id }) as never);
 }
 
 /** The production `lookup` for `checkNoteCitation`. */
 export function noteLookup(db: Db): NoteLookup {
-  const byId = db.prepare('SELECT rev FROM notes WHERE id = ?');
-  const byProv = db.prepare('SELECT rev FROM notes WHERE prov_id = ?');
-  return (id) => (idColumn(id) === 'id' ? byId : byProv).get(id) as { rev: string } | undefined;
+  const byId = db.prepare(noteSql('rev', 'x'));
+  const byProv = db.prepare(noteSql('rev', PROVISIONAL_PREFIX));
+  return (id) => (idColumn(id) === 'id' ? byId : byProv).get({ id }) as { rev: string } | undefined;
 }
 
 export interface CitingNote {
@@ -197,16 +234,16 @@ export interface CitingNote {
 
 /**
  * Notes whose `sources` or `derived_from` cite the note `id` refers to (by
- * its current id or its provisional id), in listing order.
+ * its current id, its provisional id, or `id` itself when it is an alias), in listing order.
  */
 export function citingNotes(db: Db, id: string): CitingNote[] {
-  const note = db.prepare(`SELECT id, prov_id FROM notes WHERE ${idColumn(id)} = ?`).get(id) as
+  const note = db.prepare(noteSql('id, prov_id', id)).get({ id }) as
     { id: string; prov_id: string } | undefined;
-  const targets = note ? [note.id, note.prov_id] : [id, id];
+  const targets = note ? [note.id, note.prov_id, id] : [id, id, id];
   const rows = db.prepare(
     `SELECT c.from_id, c.from_path, n.provisional, c.field, c.to_rev, c.citation
        FROM cites c JOIN notes n ON n.path = c.from_path
-      WHERE c.to_id IN (?, ?) ORDER BY n.path_nfc, n.path, c.ordinal`,
+      WHERE c.to_id IN (?, ?, ?) ORDER BY n.path_nfc, n.path, c.ordinal`,
   ).all(...targets) as { from_id: string; from_path: string; provisional: number; field: CitingNote['field']; to_rev: string; citation: string }[];
   return rows.map((r) => ({
     fromId: r.from_id, fromPath: r.from_path, provisional: r.provisional === 1, field: r.field, toRev: r.to_rev, citation: r.citation,
