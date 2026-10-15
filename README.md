@@ -8,7 +8,7 @@
 
 <p align="center">
   <a href="https://www.youtube.com/watch?v=AmsJmRBiwiI">
-    <img src="https://img.youtube.com/vi/AmsJmRBiwiI/maxresdefault.jpg" alt="Watch the e3d-brain concept film on YouTube" width="640">
+    <img src="docs/assets/film-poster.jpg" alt="A team of engineers gathered around a glowing holographic brain: watch the e3d-brain concept film on YouTube" width="640">
   </a>
   <br>
   <a href="https://www.youtube.com/watch?v=AmsJmRBiwiI"><b>▶ Watch the concept film</b></a> (1:52)
