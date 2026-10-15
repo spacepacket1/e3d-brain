@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // `ebrain` CLI entry point.
 
+import { terminalSafe } from './terminal.js';
 import { runAudit } from './audit-commands.js';
 import { runCognition } from './cognition-commands.js';
 import { runEval } from './eval-commands.js';
@@ -130,8 +131,8 @@ commands:
 config: ~/.e3d-brain/config.json (override with EBRAIN_CONFIG)`;
 
 function emit(r: CommandResult): number {
-  process.stdout.write(r.stdout);
-  process.stderr.write(r.stderr);
+  process.stdout.write(terminalSafe(r.stdout));
+  process.stderr.write(terminalSafe(r.stderr));
   return r.code;
 }
 

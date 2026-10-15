@@ -51,7 +51,41 @@ export function scanLines(body: string, firstLine = 1): MdLine[] {
 
 /** Blank out inline code spans (a backtick run closed by a run of equal length). */
 export function maskInlineCode(text: string): string {
-  return text.replace(/(`+)([\s\S]*?[^`])\1(?!`)/g, (m) => ' '.repeat(m.length));
+  if (!text.includes('`')) return text;
+  // Linear in the line length: split into maximal backtick runs, then pair each run with the next run of the same
+  // length. (The former regex backtracked cubically on a long line of backticks: ~10 s at 5,000 of them.)
+  const starts: number[] = [];
+  const lens: number[] = [];
+  for (let i = 0; i < text.length; ) {
+    if (text.charCodeAt(i) !== 96) {
+      i++;
+      continue;
+    }
+    let j = i;
+    while (j < text.length && text.charCodeAt(j) === 96) j++;
+    starts.push(i);
+    lens.push(j - i);
+    i = j;
+  }
+  const next: number[] = new Array<number>(starts.length).fill(-1);
+  const seen = new Map<number, number>();
+  for (let r = starts.length - 1; r >= 0; r--) {
+    next[r] = seen.get(lens[r]!) ?? -1;
+    seen.set(lens[r]!, r);
+  }
+  const chars = text.split('');
+  for (let r = 0; r < starts.length; ) {
+    const c = next[r]!;
+    if (c < 0) {
+      r++;
+      continue;
+    }
+    const from = starts[r]!;
+    const to = starts[c]! + lens[c]!;
+    for (let k = from; k < to; k++) chars[k] = ' ';
+    r = c + 1;
+  }
+  return chars.join('');
 }
 
 export interface WikiLink {
