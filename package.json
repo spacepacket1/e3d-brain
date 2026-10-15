@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "Local-first, auditable MCP memory server over a plain-Markdown Obsidian vault",
   "license": "MIT",
+  "author": "Chris Bloom",
   "private": true,
   "type": "module",
   "engines": {
