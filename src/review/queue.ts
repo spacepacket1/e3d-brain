@@ -26,8 +26,10 @@
 import * as path from 'node:path';
 import { parseDocument, stringify } from 'yaml';
 import { checkNoteCitation, parseCitation } from '../cite/citation.js';
+import { resolveCitation } from '../cite/resolve.js';
 import { findProposalRun, type RunRecord } from '../cognition/runs.js';
 import { recordRejection } from '../cognition/rejections.js';
+import type { EvidenceSource } from '../evidence/source.js';
 import { openInEditor } from '../exec/editor.js';
 import { rejectProposal, ReviewError } from '../inbox/review.js';
 import { isoSeconds } from '../inbox/note.js';
@@ -57,6 +59,8 @@ export interface ReviewQueueEnv {
   now?: () => Date;
   /** Environment for `$VISUAL`/`$EDITOR` (review edit). */
   editorEnv?: NodeJS.ProcessEnv;
+  /** Local evidence for `thesis:`/`outcome:` citations (Phase 3); without it they are unresolved and block accept. */
+  evidence?: EvidenceSource;
   /** Test hook passed to the undo store (called after each op is published). */
   afterPublish?: (index: number) => void;
   /** Test hook: runs after the operation commits and before the proposal is finalized (throw to simulate a crash). */
@@ -243,6 +247,10 @@ export function planProposal(env: ReviewQueueEnv, p: ParsedProposal): Plan {
     if (parsed.ok && parsed.citation.kind === 'note') {
       const f = checkNoteCitation(parsed.citation, lookup);
       if (f !== 'fresh') plan.stale.push(`evidence ${c} is ${f}`);
+    } else if (parsed.ok && (parsed.citation.kind === 'thesis' || parsed.citation.kind === 'outcome')) {
+      // Blocked, not stale: a resolution status is never persisted as truth, so the proposal is not marked.
+      const r = resolveCitation(c, env.evidence === undefined ? {} : { evidence: env.evidence });
+      if (r.status !== 'resolved') plan.blocked.push(`evidence ${c} is ${r.status}: ${r.detail}`);
     }
   }
   const taken = new Set<string>();

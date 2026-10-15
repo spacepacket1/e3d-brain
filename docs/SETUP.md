@@ -207,6 +207,10 @@ Optional keys may be omitted to take their defaults.
 | `recallLog.retentionDays` | no | `180` | integer 1-36500; `ebrain recalls prune` drops recall records older than this |
 | `inbox.maxPendingProposals` | no | `50` | integer 1-10000; a cognition run stops creating proposals once this many typed proposals are open (`status: proposed`) in `_inbox/` |
 | `cognition.maxProposalsPerRun` | no | `20` | integer 1-10000; most proposals one cognition run creates (`--max-proposals` overrides); LLM caps are `llm.maxCallsPerRun` and `llm.maxInputCharsPerRun` |
+| `evidence.dir` | no | `<stateDir>/evidence` | absolute or `~/`; not inside the vault (or containing it) and not the state directory itself; `evidence import` writes here and every `*.jsonl` in it is loaded |
+| `evidence.sources` | no | `[]` | up to 64 `.jsonl` files (absolute or `~/`, no `.`/`..` segments), outside the vault and the state directory; read-only, loaded before `evidence.dir` |
+| `evidence.maxFileMB` | no | `64` | number above 0, at most 1024; larger evidence files are refused unread |
+| `evidence.maxRecordBytes` | no | `8192` | integer 256-65536; longest record line, before and after scrubbing |
 
 Later phases add keys here in the same change that adds them to the schema.
 
@@ -230,7 +234,7 @@ over a private network), `ebrain mcp --http [--host <loopback>] [--port <n>]` se
 ## State directory
 
 `stateDir` holds derived and private data (index, audit log, the recall record `recalls.jsonl`, the undo store `undo/`, the
-`propose` candidate-id ledger, hashed HTTP tokens, the reference library `refs.db`). It is created
+`propose` candidate-id ledger, hashed HTTP tokens, the reference library `refs.db`, imported evidence files `evidence/` and their index `evidence.db`). It is created
 with mode `0700`; files the tool creates are `0600`. It is never synced
 between machines and never placed inside the vault.
 
@@ -478,6 +482,72 @@ proposal with `status: proposed`. `targets`, `evidence`, `proposal_key`,
 runs skip a rejected key unless you pass `--reconsider`. `ebrain inbox
 accept/reject` keep working for ordinary notes; `review` only handles
 `kind: proposal` notes from recorded runs.
+
+## Evidence files (thesis and outcome records)
+
+Jobs such as `reflect` learn from real outcomes. That evidence reaches the
+brain only as **local JSONL files**: e3d-brain never contacts E3D services
+(or anything else) to resolve it. Each line is one record:
+
+```json
+{"kind":"thesis","id":"th_123","occurred":"2026-09-01T00:00:00Z","summary":"short text","attributes":{"agent":"0x...","status":"closed"}}
+{"kind":"outcome","id":"oc_456","occurred":"2026-09-20T00:00:00Z","summary":"short text","attributes":{"thesis":"th_123","result":"win","metric":"+4.2%"}}
+```
+
+| Field | Rule |
+|---|---|
+| `kind` | `[a-z][a-z0-9_]{0,31}`; `thesis` and `outcome` are citable (`thesis:<id>`, `outcome:<id>`) |
+| `id` | the citation id grammar, `[A-Za-z0-9_]+`, at most 128 characters |
+| `occurred` | ISO 8601 UTC with `Z` (`2026-09-01T00:00:00Z`, fractional seconds allowed); real calendar dates only |
+| `summary` | non-empty, at most 1000 characters, no control characters |
+| `attributes` | optional object; identifier keys; strings, numbers, booleans, null, arrays, objects; at most 256 values and two levels of nesting below `attributes` |
+
+No other top-level keys are allowed. A line longer than
+`evidence.maxRecordBytes` (default 8192) or nested deeper than allowed is
+skipped **before** it is parsed; a line that fails any rule is skipped. Skipped
+lines are counted by reason (`malformed`, `too large`, `too deep`,
+`scrub rejected`), and the rest of the file still loads. `summary` and every
+attribute string are scrubbed on load (agent brains use strict rules: a
+credential drops the whole record); the stored record, after scrubbing, never
+exceeds the per-record limit. When two records share a kind and id, the later
+one wins (file order, then line order) and the replaced one is counted as a
+duplicate.
+
+**Where evidence is read from (and nothing else).** Two places:
+`evidence.sources` (a list of `.jsonl` files outside the vault and the state
+directory) and every `*.jsonl` directly inside `evidence.dir` (default
+`<stateDir>/evidence`). Files are opened read-only, each inside its own
+configured root: a symlink that leads outside that root, any symlink inside
+`evidence.dir`, a dot-file, a non-regular file, or a file larger than
+`evidence.maxFileMB` (default 64) is refused unread and listed by `evidence
+stats`. Loading makes no network connection.
+
+```bash
+ebrain evidence import ~/Downloads/e3d-evidence.jsonl   # validate, scrub, write into evidence.dir (atomic)
+ebrain evidence import export.jsonl --name agent-a.jsonl # pick the file name in evidence.dir
+ebrain evidence stats                                    # per file: records, skipped lines by reason, duplicates
+ebrain evidence reindex                                  # rebuild the index from the files
+```
+
+`evidence import` writes only the validated, scrubbed records (one canonical
+JSON object per line) via a temp file and an atomic rename, replacing an
+earlier import of the same name; a file with no valid record is refused and
+nothing is written. Records are indexed into `<stateDir>/evidence.db`, derived
+data like `index.db`: it is rebuilt automatically whenever a file, a limit, or
+the scrub settings change, and can be deleted at any time.
+
+**Citation resolution.** Jobs and `review` resolve each citation to
+`resolved`, `unresolved` (well-formed but not found locally; `commit:` and
+`url:` citations are never fetched), `stale` (a note citation whose note has a
+newer revision), or `malformed`. A status is computed per run and cached only
+for that run; it is never written back as a fact. `review accept` refuses
+(without marking the proposal stale) while a cited `thesis:`/`outcome:` record
+is not in the local evidence.
+
+**Exporting from E3D.** The exporter lives in the E3D repositories, not here;
+`scripts/export-e3d-evidence.md` describes the fields it must produce. Run it
+on a machine that holds the data, copy the file over, and `ebrain evidence
+import` it (or list its path in `evidence.sources` and re-export in place).
 
 ## Scrubbing
 

@@ -213,6 +213,9 @@ const ORDER_ALLOWED: Record<string, string> = {
   'src/cognition/runs.ts': 'run records newest first (ULID order)',
   'src/cognition/prompts.ts': 'prompt versions in numeric order',
   'src/cognition/jobs/selftest.ts': 'selftest priority: vault path order (documented job rule)',
+  'src/evidence/record.ts': 'attribute keys in canonical (sorted) order',
+  'src/evidence/source.ts': 'evidence kinds in name order; list in (occurred, id) time order',
+  'src/evidence/store.ts': 'evidence files in load order (dir by name); kinds by name; list in (occurred, id) time order',
 };
 const ORDER_PATTERNS = [/\.sort\s*\(/, /\.toSorted\s*\(/, /\.reverse\s*\(/, /\.toReversed\s*\(/, /\bORDER\s+BY\b/i];
 const RELEVANCE_ORDER = /\bORDER\s+BY\b[^;`'"]*\b(?:bm25|rank|score|relevance)\b/i;

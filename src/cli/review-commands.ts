@@ -5,6 +5,7 @@
 // memory-layer `ebrain inbox ...` commands stay as they are for ordinary notes.
 
 import { ConfigError, ensureStateDir, loadConfig, type EnvOptions } from '../config.js';
+import { EvidenceError, lazyEvidence, type OpenEvidence } from '../evidence/store.js';
 import { closeIndex, openIndex } from '../index/indexer.js';
 import { inboxDir } from '../inbox/writer.js';
 import {
@@ -62,12 +63,14 @@ export function runReview(args: readonly string[], opts: ReviewCommandOptions = 
 
   let h: ReturnType<typeof openIndex>;
   let env: ReviewQueueEnv;
+  let evidence: OpenEvidence | undefined;
   try {
     const { config } = loadConfig(opts);
     const stateDir = ensureStateDir(config);
     h = openIndex({ vaultPath: config.vaultPath, stateDir });
     env = {
       vaultPath: config.vaultPath, stateDir, index: h, editorEnv: opts.env ?? process.env,
+      evidence: (evidence = lazyEvidence({ config, stateDir })),
       ...(opts.now === undefined ? {} : { now: opts.now }),
       ...(opts.afterPublish === undefined ? {} : { afterPublish: opts.afterPublish }),
       ...(opts.afterCommit === undefined ? {} : { afterCommit: opts.afterCommit }),
@@ -122,9 +125,10 @@ export function runReview(args: readonly string[], opts: ReviewCommandOptions = 
       }
     }
   } catch (err) {
-    const known = err instanceof ReviewError || err instanceof SafePathError || err instanceof UndoError;
+    const known = err instanceof ReviewError || err instanceof SafePathError || err instanceof UndoError || err instanceof EvidenceError;
     return { code: 1, stdout: '', stderr: `ebrain review: ${known ? message(err) : `failed: ${message(err)}`}\n` };
   } finally {
+    evidence?.close();
     closeIndex(h);
   }
 }

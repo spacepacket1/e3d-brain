@@ -36,6 +36,23 @@ export interface Config {
   recallLog: RecallLogConfig;
   inbox: InboxConfig;
   cognition: CognitionConfig;
+  evidence: EvidenceConfig;
+}
+
+/**
+ * Local evidence files (cognition Phase 3): JSONL exports of thesis/outcome
+ * records, read-only, size-limited, and indexed into `<stateDir>/evidence.db`.
+ * Nothing outside `dir` and the listed `sources` is ever read.
+ */
+export interface EvidenceConfig {
+  /** `ebrain evidence import` writes here; every `*.jsonl` directly in it is loaded. */
+  dir: string;
+  /** Extra JSONL files (absolute or `~/`), loaded in this order before the files in `dir`. */
+  sources: string[];
+  /** Largest evidence file read, in MB (larger files are refused unread). */
+  maxFileMB: number;
+  /** Longest record line, in bytes, before and after scrubbing (longer records are skipped and counted). */
+  maxRecordBytes: number;
 }
 
 /** Flood control for typed proposals (cognition Phase 2). */
@@ -147,6 +164,14 @@ export const DEFAULT_MAX_PENDING_PROPOSALS = 50;
 export const DEFAULT_MAX_PROPOSALS_PER_RUN = 20;
 /** Upper bound for `inbox.maxPendingProposals`, `cognition.maxProposalsPerRun`, and `--max-proposals`. */
 export const MAX_PROPOSALS_CEILING = 10_000;
+/** `evidence.dir` default: `<stateDir>/evidence`. */
+export const DEFAULT_EVIDENCE_DIR_NAME = 'evidence';
+export const DEFAULT_EVIDENCE_MAX_FILE_MB = 64;
+export const MAX_EVIDENCE_FILE_MB = 1024;
+export const DEFAULT_EVIDENCE_MAX_RECORD_BYTES = 8192;
+export const MIN_EVIDENCE_RECORD_BYTES = 256;
+export const MAX_EVIDENCE_RECORD_BYTES = 65_536;
+export const MAX_EVIDENCE_SOURCES = 64;
 /** Upper bounds for `refs.*`: excerpts and hits stay short so a book cannot be dumped through `search`. */
 export const MAX_REF_EXCERPT_CHARS = 1000;
 export const MAX_REF_HITS = 20;
@@ -262,7 +287,7 @@ function isInsideLexical(parent: string, child: string): boolean {
 export function parseConfig(raw: unknown, opts: { homeDir?: string } = {}): Config {
   const home = opts.homeDir ?? os.homedir();
   if (!isObject(raw)) throw new ConfigError('config must be a JSON object');
-  checkKeys(raw, ['vaultPath', 'stateDir', 'principal', 'mode', 'limits', 'network', 'scrub', 'embeddings', 'audit', 'journal', 'refs', 'hooks', 'llm', 'recallLog', 'inbox', 'cognition'], '');
+  checkKeys(raw, ['vaultPath', 'stateDir', 'principal', 'mode', 'limits', 'network', 'scrub', 'embeddings', 'audit', 'journal', 'refs', 'hooks', 'llm', 'recallLog', 'inbox', 'cognition', 'evidence'], '');
 
   const vaultPath = expandHome(requiredStr(raw, 'vaultPath', 'vaultPath'), 'vaultPath', home);
   const stateDir = expandHome(str(raw, 'stateDir', 'stateDir') ?? DEFAULT_STATE_DIR, 'stateDir', home);
@@ -403,7 +428,49 @@ export function parseConfig(raw: unknown, opts: { homeDir?: string } = {}): Conf
     recallLog: { retentionDays },
     inbox: { maxPendingProposals: countKey(inboxRaw, 'inbox.maxPendingProposals', 'maxPendingProposals', DEFAULT_MAX_PENDING_PROPOSALS) },
     cognition: { maxProposalsPerRun: countKey(cognitionRaw, 'cognition.maxProposalsPerRun', 'maxProposalsPerRun', DEFAULT_MAX_PROPOSALS_PER_RUN) },
+    evidence: parseEvidence(section(raw, 'evidence', ['dir', 'sources', 'maxFileMB', 'maxRecordBytes'], false), vaultPath, stateDir, home),
   };
+}
+
+function parseEvidence(evRaw: Json, vaultPath: string, stateDir: string, home: string): EvidenceConfig {
+  const rawDir = str(evRaw, 'dir', 'evidence.dir');
+  if (rawDir !== undefined && rawDir.split('/').some((seg) => seg === '..' || seg === '.')) {
+    throw new ConfigError('config key "evidence.dir" must not contain "." or ".." segments');
+  }
+  const dir = rawDir === undefined ? path.join(stateDir, DEFAULT_EVIDENCE_DIR_NAME) : expandHome(rawDir, 'evidence.dir', home);
+  if (isInsideLexical(vaultPath, dir) || isInsideLexical(dir, vaultPath)) {
+    throw new ConfigError('config key "evidence.dir" must not be inside the vault or contain it');
+  }
+  // The state dir holds other JSONL files (recalls, run logs); only a subdirectory of it may hold evidence.
+  if (isInsideLexical(dir, stateDir)) throw new ConfigError('config key "evidence.dir" must not be the state directory or contain it');
+
+  const sources = stringArray(evRaw, 'sources', 'evidence.sources');
+  if (sources.length > MAX_EVIDENCE_SOURCES) throw new ConfigError(`config key "evidence.sources" has more than ${MAX_EVIDENCE_SOURCES} entries`);
+  const resolved: string[] = [];
+  for (const entry of sources) {
+    if (entry.split('/').some((seg) => seg === '..' || seg === '.')) {
+      throw new ConfigError('config key "evidence.sources" entries must not contain "." or ".." segments');
+    }
+    const file = expandHome(entry, 'evidence.sources', home);
+    if (!file.endsWith('.jsonl') || path.basename(file).startsWith('.')) {
+      throw new ConfigError('config key "evidence.sources" entries must name .jsonl files (not dot-files)');
+    }
+    if (isInsideLexical(vaultPath, file) || isInsideLexical(stateDir, file)) {
+      throw new ConfigError('config key "evidence.sources" entries must not be inside the vault or the state directory (import them with `ebrain evidence import`)');
+    }
+    if (resolved.includes(file)) throw new ConfigError('config key "evidence.sources" lists a file twice');
+    resolved.push(file);
+  }
+
+  const maxFileMB = evRaw.maxFileMB === undefined ? DEFAULT_EVIDENCE_MAX_FILE_MB : evRaw.maxFileMB;
+  if (typeof maxFileMB !== 'number' || !Number.isFinite(maxFileMB) || maxFileMB <= 0 || maxFileMB > MAX_EVIDENCE_FILE_MB) {
+    throw new ConfigError(`config key "evidence.maxFileMB" must be a number above 0 and at most ${MAX_EVIDENCE_FILE_MB}`);
+  }
+  const maxRecordBytes = evRaw.maxRecordBytes === undefined ? DEFAULT_EVIDENCE_MAX_RECORD_BYTES : evRaw.maxRecordBytes;
+  if (typeof maxRecordBytes !== 'number' || !Number.isInteger(maxRecordBytes) || maxRecordBytes < MIN_EVIDENCE_RECORD_BYTES || maxRecordBytes > MAX_EVIDENCE_RECORD_BYTES) {
+    throw new ConfigError(`config key "evidence.maxRecordBytes" must be an integer from ${MIN_EVIDENCE_RECORD_BYTES} to ${MAX_EVIDENCE_RECORD_BYTES}`);
+  }
+  return { dir, sources: resolved, maxFileMB, maxRecordBytes };
 }
 
 function parseLlm(llmRaw: Json, allowedHosts: readonly string[]): LlmConfig {

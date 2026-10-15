@@ -3,6 +3,7 @@
 
 import { runAudit } from './audit-commands.js';
 import { runCognition } from './cognition-commands.js';
+import { runEvidence } from './evidence-commands.js';
 import { runDoctor } from './doctor.js';
 import { runInbox } from './inbox-commands.js';
 import { runIndexCommand, runReindex, type CommandResult } from './index-commands.js';
@@ -94,6 +95,10 @@ commands:
                     move to _inbox/_rejected/ and remember it so re-runs do not propose it again
   review undo <id>  restore what accept changed (refuses if any file was edited since)
   review recover    roll back an interrupted apply and finish interrupted accepts
+  evidence import <file> [--name <name>.jsonl]
+                    validate a thesis/outcome JSONL export and write its scrubbed records into evidence.dir (atomic)
+  evidence stats    per-file record and skipped-line counts for the local evidence index (<stateDir>/evidence.db)
+  evidence reindex  rebuild <stateDir>/evidence.db from the evidence files
   recalls prune [--older-than <days>]
                     drop recall records older than recallLog.retentionDays (default 180) from <stateDir>/recalls.jsonl
   scrub <file|-> [--strict] [--entropy-threshold <bits>]
@@ -214,6 +219,8 @@ export function main(argv: readonly string[]): number | Promise<number> {
       return runCognition(rest).then(emit);
     case 'review':
       return emit(runReview(rest));
+    case 'evidence':
+      return emit(runEvidence(rest));
     case 'undo':
       return emit(runUndo(rest));
     case 'recalls':
