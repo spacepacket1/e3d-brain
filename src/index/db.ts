@@ -12,7 +12,7 @@ export type Db = BetterSqlite3.Database;
 export const INDEX_FILE = 'index.db';
 export const BUSY_TIMEOUT_MS = 10000;
 /** Bump when the table layout changes: an index with another version is rebuilt. */
-export const SCHEMA_VERSION = 7;
+export const SCHEMA_VERSION = 9;
 
 const TABLES = [
   'meta', 'notes', 'chunks', 'chunks_fts', 'links', 'tags', 'aliases', 'headings', 'problems', 'cites', 'note_revisions',
@@ -81,7 +81,8 @@ CREATE TABLE chunks (
   chunk_rev TEXT NOT NULL,        -- same procedure as rev, over the chunk text
   UNIQUE (note_path, ordinal)
 ) STRICT;
-CREATE VIRTUAL TABLE chunks_fts USING fts5(text, tokenize = 'porter unicode61 remove_diacritics 2');
+-- text is the chunk body; title, headings (the chunk's heading path) and path make a note findable by name and are weighted up in search
+CREATE VIRTUAL TABLE chunks_fts USING fts5(text, title, headings, path, tokenize = 'porter unicode61 remove_diacritics 2');
 CREATE TABLE links (
   note_path TEXT NOT NULL,
   ordinal INTEGER NOT NULL,
