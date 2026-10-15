@@ -5,12 +5,13 @@
 // to `_inbox/` whatever the mode.
 
 import { ConfigError, ensureStateDir, loadConfig, MAX_PROPOSALS_CEILING, type EnvOptions } from '../config.js';
+import { analyzeForget, describeSignals } from '../cognition/jobs/forget.js';
 import { findJob, JOBS } from '../cognition/jobs/index.js';
 import { CognitionError, runJob } from '../cognition/run.js';
 import { listRunRecords, type RunRecord } from '../cognition/runs.js';
 import { PromptFileError } from '../cognition/prompts.js';
 import { discoverEvidence, EvidenceError, openEvidence, type OpenEvidence } from '../evidence/store.js';
-import { closeIndex, openIndex } from '../index/indexer.js';
+import { closeIndex, openIndex, refreshIndex } from '../index/indexer.js';
 import { createProvider, DATA_LEAVES_MACHINE_FLAG, LlmRefusedError, type ExtractionProvider } from '../llm/provider.js';
 import { SafePathError } from '../safe-path.js';
 import { isIsoDate } from '../vault/parse.js';
@@ -18,6 +19,7 @@ import type { CommandResult } from './index-commands.js';
 
 export const COGNITION_USAGE = `usage: ebrain cognition run <job> [--since <date>] [--max-proposals <n>] [--dry-run] [--reconsider] [${DATA_LEAVES_MACHINE_FLAG}]
        ebrain cognition runs [-n <count>]
+       ebrain cognition stats forget
 jobs: ${JOBS.map((j) => `${j.name} (${j.description})`).join('; ')}`;
 
 export interface CognitionCommandOptions extends EnvOptions {
@@ -72,6 +74,14 @@ function summarize(r: RunRecord, created: { id: string; path: string }[], maxPen
     } else {
       lines.push('no LLM provider: summaries are extractive link lists');
     }
+  }
+  if (r.job === 'forget') {
+    lines.push(
+      `forget: ${c('eligible_notes')} notes considered; skipped ${c('skipped_pinned')} pinned, ${c('skipped_exempt_kind')} of an exempt kind, ${c('skipped_young')} too young, ` +
+        `${c('skipped_recalled')} recalled within the window, ${c('skipped_no_history')} without enough recall history, ${c('skipped_cited')} cited by an accepted note; ` +
+        `${c('demote_candidates')} demote and ${c('archive_candidates')} archive candidates (${c('expired_journal')} expired journal entries)`,
+      'nothing is deleted: demote sets status: stale, archive moves to _archive/; review each with: ebrain review show <id>',
+    );
   }
   if (r.job === 'reflect') {
     lines.push(
@@ -183,6 +193,40 @@ function runsCommand(args: readonly string[], opts: CognitionCommandOptions): Co
   }
 }
 
+const STATS_TOP = 10;
+
+function statsCommand(args: readonly string[], opts: CognitionCommandOptions): CommandResult {
+  if (args[0] !== 'forget' || args.length !== 1) return usage(args.length === 0 ? 'stats needs a report name (forget)' : `unknown stats report ${JSON.stringify(args[0])} (expected: forget)`);
+  let h: ReturnType<typeof openIndex> | undefined;
+  try {
+    const { config } = loadConfig(opts);
+    const stateDir = ensureStateDir(config);
+    h = openIndex({ vaultPath: config.vaultPath, stateDir });
+    refreshIndex(h);
+    const a = analyzeForget({ config, index: h, stateDir, now: (opts.now ?? (() => new Date()))() });
+    const c = (k: string): number => a.counts[k] ?? 0;
+    const f = config.cognition.forget;
+    const lines = [
+      `forget stats: window ${f.windowDays} days, minimum age ${f.minAgeDays} days, exempt kinds: ${f.exemptKinds.join(', ') || '(none)'}`,
+      `recall record starts: ${a.trackingStart ?? 'no records yet (never-recalled notes are not candidates)'}`,
+      `notes considered: ${c('eligible_notes')}`,
+      `skipped: ${c('skipped_pinned')} pinned, ${c('skipped_exempt_kind')} exempt kind, ${c('skipped_young')} too young, ${c('skipped_recalled')} recalled in the window, ` +
+        `${c('skipped_no_history')} without enough recall history, ${c('skipped_cited')} cited by an accepted note, ${c('skipped_provisional')} provisional id`,
+      `candidates: ${c('demote_candidates')} demote, ${c('archive_candidates')} archive` +
+        (config.journal.pruneRequiresReview ? ` (including ${c('expired_journal')} expired journal entries)` : ''),
+    ];
+    if (a.candidates.length > 0) {
+      lines.push(`top ${Math.min(STATS_TOP, a.candidates.length)} (oldest last recall first; signal values, not scores):`);
+      for (const k of a.candidates.slice(0, STATS_TOP)) lines.push(`  ${k.action} ${k.row.path}: ${describeSignals(k.signals)}`);
+    }
+    return { code: 0, stdout: `${lines.join('\n')}\n`, stderr: '' };
+  } catch (err) {
+    return fail(`${err instanceof ConfigError ? 'config: ' : ''}${message(err)}`);
+  } finally {
+    if (h !== undefined) closeIndex(h);
+  }
+}
+
 export async function runCognition(args: readonly string[], opts: CognitionCommandOptions = {}): Promise<CommandResult> {
   const [sub, ...rest] = args;
   switch (sub) {
@@ -190,6 +234,8 @@ export async function runCognition(args: readonly string[], opts: CognitionComma
       return runCommand(rest, opts);
     case 'runs':
       return runsCommand(rest, opts);
+    case 'stats':
+      return statsCommand(rest, opts);
     default:
       return usage(sub === undefined ? 'missing subcommand' : `unknown subcommand ${JSON.stringify(sub)}`);
   }

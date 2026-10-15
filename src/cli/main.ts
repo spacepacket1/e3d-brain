@@ -202,7 +202,7 @@ export function main(argv: readonly string[]): number | Promise<number> {
     case 'inbox':
       return emit(runInbox(rest));
     case 'journal':
-      return emit(runJournal(rest));
+      return runJournal(rest).then(emit);
     case 'import':
       return isConversationImportSource(rest[0]) ? runConversationImport(rest).then(emit) : emit(runImport(rest));
     case 'refs':

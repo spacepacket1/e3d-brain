@@ -212,6 +212,7 @@ const ORDER_ALLOWED: Record<string, string> = {
   'src/cognition/run.ts': 'run-record inputs and taint sources in id order',
   'src/cognition/runs.ts': 'run records newest first (ULID order)',
   'src/cognition/prompts.ts': 'prompt versions in numeric order',
+  'src/cognition/jobs/forget.ts': 'forget priority: oldest last recall first, then reference date and vault path (documented job rule)',
   'src/cognition/jobs/selftest.ts': 'selftest priority: vault path order (documented job rule)',
   'src/cognition/jobs/supersede.ts': 'supersede priority: newer date, then paths (documented job rule); signals in name order',
   'src/cognition/dedup.ts': 'duplicate pairs by Jaccard, then keys (documented deterministic output order)',

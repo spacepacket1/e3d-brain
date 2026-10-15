@@ -137,7 +137,7 @@ describe('journal entries (pure)', () => {
 
   it('config: journal limits default and validate', () => {
     const base = { vaultPath: '/v', stateDir: '/s', principal: { id: 'a', type: 'agent' }, mode: 'journal' };
-    assert.deepEqual(parseConfig(base).journal, { ttlDays: 90, maxEntryChars: 4000, maxEntriesPerHour: 60, maxTotalMB: 100 });
+    assert.deepEqual(parseConfig(base).journal, { ttlDays: 90, maxEntryChars: 4000, maxEntriesPerHour: 60, maxTotalMB: 100, pruneRequiresReview: false });
     assert.equal(parseConfig({ ...base, journal: { maxTotalMB: 0.01 } }).journal.maxTotalMB, 0.01);
     for (const bad of [{ ttlDays: 0 }, { maxEntryChars: 1.5 }, { maxEntriesPerHour: '60' }, { maxTotalMB: -1 }, { other: 1 }]) {
       assert.throws(() => parseConfig({ ...base, journal: bad }), /journal/);

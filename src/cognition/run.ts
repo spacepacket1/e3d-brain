@@ -64,6 +64,7 @@ export interface Draft {
 export interface JobContext {
   config: Config;
   index: IndexHandle;
+  stateDir: SafePath;
   now: Date;
   /** `--since` as epoch ms. */
   sinceMs?: number;
@@ -255,7 +256,7 @@ export async function runJob(opts: RunOptions): Promise<RunResult> {
       };
       const known = (types: readonly ProposalType[], evidence: readonly string[]): boolean => knownAs(types, evidence) !== undefined;
       const ctx: JobContext = {
-        config, index: opts.index, now, scrubText, known, knownAs,
+        config, index: opts.index, stateDir, now, scrubText, known, knownAs,
         input: (id, rev) => void inputs.set(id, rev),
         count,
         ...(opts.sinceMs === undefined ? {} : { sinceMs: opts.sinceMs }),

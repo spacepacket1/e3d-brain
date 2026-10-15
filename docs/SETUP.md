@@ -190,6 +190,7 @@ Optional keys may be omitted to take their defaults.
 | `journal.maxEntryChars` | no | `4000` | integer 1-100000; longest `journal_append` body (longer is rejected, never truncated) |
 | `journal.maxEntriesPerHour` | no | `60` | integer 1-100000; entries per rolling hour, counted from file names in the journal directory |
 | `journal.maxTotalMB` | no | `100` | number above 0; total size of `journal/<principal-id>/` (stat sizes) |
+| `journal.pruneRequiresReview` | no | `false` | `true` or `false`; `true` makes `ebrain journal prune` file expired entries as `archive` proposals (the `forget` mechanism) instead of moving them; the default keeps the direct, non-destructive archive |
 | `refs.excerptChars` | no | `400` | integer 1-1000; longest excerpt per reference-book hit in `search` (compact format: at most 200) |
 | `refs.maxHits` | no | `5` | integer 1-20; most reference-book hits per `search` call (also bounded by `limit`) |
 | `hooks.briefFolders` | no | `[]` | up to 32 vault-relative folders (`notes/work`) or `#tag` names whose recent accepted notes go in the session brief; empty lists no notes |
@@ -214,6 +215,9 @@ Optional keys may be omitted to take their defaults.
 | `cognition.reflect.maxLessons` | no | `3` | integer 1-10; `reflect` asks the model for at most this many lessons per closed thesis (or decision) |
 | `cognition.reflect.minDuplicateJaccard` | no | `0.5` | number above 0, at most 1; a proposed lesson whose 3-word-shingle Jaccard with an existing accepted lesson (or another lesson of the run) is at least this is dropped as a duplicate |
 | `cognition.reflect.decisions` | no | `false` | `true` or `false`; also reflect on curated `decision` notes cited (in `sources`) by a later note tagged `#outcome` or with an `outcome:` key (the human-brain variant) |
+| `cognition.forget.windowDays` | no | `180` | integer 1-36500; `forget` proposes only notes with no recall in this many days (keep `recallLog.retentionDays` at least this large) |
+| `cognition.forget.minAgeDays` | no | `90` | integer 1-36500; and whose latest of `occurred`, `created`, and file modified time is at least this old |
+| `cognition.forget.exemptKinds` | no | `["decision", "reference"]` | array of lowercase kind names; notes of these kinds are never proposed (a decision or reference is often the sole record of something) |
 | `cognition.maxProposalsPerRun` | no | `20` | integer 1-10000; most proposals one cognition run creates (`--max-proposals` overrides); LLM caps are `llm.maxCallsPerRun` and `llm.maxInputCharsPerRun` |
 | `evidence.dir` | no | `<stateDir>/evidence` | absolute or `~/`; not inside the vault (or containing it) and not the state directory itself; `evidence import` writes here and every `*.jsonl` in it is loaded |
 | `evidence.sources` | no | `[]` | up to 64 `.jsonl` files (absolute or `~/`, no `.`/`..` segments), outside the vault and the state directory; read-only, loaded before `evidence.dir` |
@@ -629,6 +633,44 @@ requires a configured evidence source.
 
 Re-runs create nothing new and make no model calls for theses already
 proposed; rejected proposals are not re-proposed unless `--reconsider`.
+
+### The forget job
+
+`ebrain cognition run forget` asks "which notes have gone quiet?". It uses
+no model and never deletes anything: it proposes `demote` (sets `status:
+stale`; the note stays searchable but ranks below normal notes) or `archive`
+(moves the note to `_archive/<path>`, with `status: archived` and
+`archived_at`, keeping all content). `ebrain review undo` restores either at
+the original path.
+
+**Signals.** Age since the latest of `occurred`, `created`, and the file's
+modified time; recall count and last recall (the recall record,
+`<stateDir>/recalls.jsonl`, rolled up into a derived `note_stats` table that
+every run rebuilds from it, so deleting the table or the index loses
+nothing); how many linked notes are superseded or archived; and `expires`.
+Proposals and the report show these values, never a score.
+
+**Candidates.** A curated note (status none, `accepted`, or `stale`, with an
+assigned id) is proposed only when it is not `pinned`; its kind is not in
+`cognition.forget.exemptKinds`; it is at least `minAgeDays` old; it has no
+recall in `windowDays`; and no accepted curated note cites it (`sources` or
+`derived_from`). A never-recalled note counts only when the recall record
+starts before the window (otherwise "never" is unknown and the note is
+skipped). An accepted note gets a `demote` proposal; a note that is already
+`stale` and still qualifies gets an `archive` proposal. Order: oldest last
+recall first (never recalled first), then older, then path. Because the
+modified time counts, anything that rewrites a note (for example `ebrain ids
+assign`) makes it look newer.
+
+**Journal.** With `journal.pruneRequiresReview: true`, entries whose
+`expires` has passed become `archive` proposals (to
+`journal/_archive/<principal>/...`), both from this job and from `ebrain
+journal prune`, which then files proposals instead of moving files. With the
+default `false`, `journal prune` archives directly as before and this job
+ignores the journal.
+
+`ebrain cognition stats forget` prints the counts and the ten top candidates
+with their signal values, and writes nothing.
 
 ## Evidence files (thesis and outcome records)
 

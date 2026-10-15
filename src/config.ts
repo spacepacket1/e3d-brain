@@ -68,6 +68,17 @@ export interface CognitionConfig {
   supersede: SupersedeConfig;
   consolidate: ConsolidateConfig;
   reflect: ReflectConfig;
+  forget: ForgetConfig;
+}
+
+/** The `forget` job's candidate rules (cognition Phase 7). */
+export interface ForgetConfig {
+  /** A note is a candidate only when it has not been recalled in this many days. */
+  windowDays: number;
+  /** ... and its last occurred/created/modified time is at least this many days old. */
+  minAgeDays: number;
+  /** Kinds never proposed (a `decision` or `reference` is often the sole record of something). */
+  exemptKinds: string[];
 }
 
 /** The `reflect` job's limits (cognition Phase 6). */
@@ -166,6 +177,8 @@ export interface JournalConfig {
   maxEntriesPerHour: number;
   /** Total size of the principal's journal directory, in MB. */
   maxTotalMB: number;
+  /** `ebrain journal prune` files expired entries as `archive` proposals (cognition `forget`) instead of moving them (cognition Phase 7). */
+  pruneRequiresReview: boolean;
 }
 
 export interface LoadedConfig {
@@ -188,7 +201,7 @@ export const MAX_CHARS_CEILING = 10000;
 /** Audit log segment size before a new segment starts (Phase 5). */
 export const DEFAULT_AUDIT_SEGMENT_MB = 50;
 const MAX_AUDIT_SEGMENT_MB = 4096;
-export const DEFAULT_JOURNAL: Readonly<JournalConfig> = { ttlDays: 90, maxEntryChars: 4000, maxEntriesPerHour: 60, maxTotalMB: 100 };
+export const DEFAULT_JOURNAL: Readonly<JournalConfig> = { ttlDays: 90, maxEntryChars: 4000, maxEntriesPerHour: 60, maxTotalMB: 100, pruneRequiresReview: false };
 export const DEFAULT_REFS: Readonly<RefsConfig> = { excerptChars: 400, maxHits: 5 };
 export const DEFAULT_RECALL_RETENTION_DAYS = 180;
 export const DEFAULT_MAX_PENDING_PROPOSALS = 50;
@@ -196,6 +209,7 @@ export const DEFAULT_MAX_PROPOSALS_PER_RUN = 20;
 export const DEFAULT_SUPERSEDE_MIN_JACCARD = 0.5;
 export const DEFAULT_SUPERSEDE_MAX_UNADJUDICATED = 5;
 export const DEFAULT_CONSOLIDATE: Readonly<ConsolidateConfig> = { minJaccard: 0.5, minCosine: 0.95, maxSummaries: 5 };
+export const DEFAULT_FORGET: Readonly<ForgetConfig> = { windowDays: 180, minAgeDays: 90, exemptKinds: ['decision', 'reference'] };
 export const DEFAULT_REFLECT: Readonly<ReflectConfig> = { maxLessons: 3, minDuplicateJaccard: 0.5, decisions: false };
 /** Upper bound for `cognition.reflect.maxLessons`. */
 export const MAX_REFLECT_LESSONS = 10;
@@ -386,7 +400,7 @@ export function parseConfig(raw: unknown, opts: { homeDir?: string } = {}): Conf
     throw new ConfigError(`config key "audit.maxSegmentMB" must be a number above 0 and at most ${MAX_AUDIT_SEGMENT_MB}`);
   }
 
-  const journalRaw = section(raw, 'journal', ['ttlDays', 'maxEntryChars', 'maxEntriesPerHour', 'maxTotalMB'], false);
+  const journalRaw = section(raw, 'journal', ['ttlDays', 'maxEntryChars', 'maxEntriesPerHour', 'maxTotalMB', 'pruneRequiresReview'], false);
   const intKey = (key: 'ttlDays' | 'maxEntryChars' | 'maxEntriesPerHour', max: number): number => {
     const v = journalRaw[key] === undefined ? DEFAULT_JOURNAL[key] : journalRaw[key];
     if (typeof v !== 'number' || !Number.isInteger(v) || v < 1 || v > max) throw new ConfigError(`config key "journal.${key}" must be an integer from 1 to ${max}`);
@@ -397,11 +411,14 @@ export function parseConfig(raw: unknown, opts: { homeDir?: string } = {}): Conf
   if (typeof maxTotalMB !== 'number' || !Number.isFinite(maxTotalMB) || maxTotalMB <= 0 || maxTotalMB > 1_000_000) {
     throw new ConfigError('config key "journal.maxTotalMB" must be a number above 0 and at most 1000000');
   }
+  const pruneRequiresReview = journalRaw.pruneRequiresReview === undefined ? DEFAULT_JOURNAL.pruneRequiresReview : journalRaw.pruneRequiresReview;
+  if (typeof pruneRequiresReview !== 'boolean') throw new ConfigError('config key "journal.pruneRequiresReview" must be true or false');
   const journal: JournalConfig = {
     ttlDays: intKey('ttlDays', 36_500),
     maxEntryChars: intKey('maxEntryChars', 100_000),
     maxEntriesPerHour: intKey('maxEntriesPerHour', 100_000),
     maxTotalMB,
+    pruneRequiresReview,
   };
 
   const refsRaw = section(raw, 'refs', ['excerptChars', 'maxHits'], false);
@@ -446,7 +463,7 @@ export function parseConfig(raw: unknown, opts: { homeDir?: string } = {}): Conf
     return v;
   };
   const inboxRaw = section(raw, 'inbox', ['maxPendingProposals'], false);
-  const cognitionRaw = section(raw, 'cognition', ['maxProposalsPerRun', 'supersede', 'consolidate', 'reflect'], false);
+  const cognitionRaw = section(raw, 'cognition', ['maxProposalsPerRun', 'supersede', 'consolidate', 'reflect', 'forget'], false);
   const supersedeRaw: Json = cognitionRaw.supersede === undefined ? {} : (cognitionRaw.supersede as Json);
   if (!isObject(supersedeRaw)) throw new ConfigError('config key "cognition.supersede" must be an object');
   checkKeys(supersedeRaw, ['minJaccard', 'maxUnadjudicated'], 'cognition.supersede.');
@@ -477,6 +494,18 @@ export function parseConfig(raw: unknown, opts: { homeDir?: string } = {}): Conf
   }
   const decisions = reflectRaw.decisions === undefined ? DEFAULT_REFLECT.decisions : reflectRaw.decisions;
   if (typeof decisions !== 'boolean') throw new ConfigError('config key "cognition.reflect.decisions" must be true or false');
+  const forgetRaw: Json = cognitionRaw.forget === undefined ? {} : (cognitionRaw.forget as Json);
+  if (!isObject(forgetRaw)) throw new ConfigError('config key "cognition.forget" must be an object');
+  checkKeys(forgetRaw, ['windowDays', 'minAgeDays', 'exemptKinds'], 'cognition.forget.');
+  const dayKey = (key: 'windowDays' | 'minAgeDays'): number => {
+    const v = forgetRaw[key] === undefined ? DEFAULT_FORGET[key] : forgetRaw[key];
+    if (typeof v !== 'number' || !Number.isInteger(v) || v < 1 || v > 36_500) throw new ConfigError(`config key "cognition.forget.${key}" must be an integer from 1 to 36500`);
+    return v;
+  };
+  const exemptRaw = forgetRaw.exemptKinds === undefined ? DEFAULT_FORGET.exemptKinds : forgetRaw.exemptKinds;
+  if (!Array.isArray(exemptRaw) || exemptRaw.length > 100 || exemptRaw.some((k) => typeof k !== 'string' || !/^[a-z][a-z0-9_-]{0,63}$/.test(k))) {
+    throw new ConfigError('config key "cognition.forget.exemptKinds" must be an array of lowercase kind names');
+  }
 
   return {
     vaultPath,
@@ -506,6 +535,7 @@ export function parseConfig(raw: unknown, opts: { homeDir?: string } = {}): Conf
         maxSummaries: countKey(consolidateRaw, 'cognition.consolidate.maxSummaries', 'maxSummaries', DEFAULT_CONSOLIDATE.maxSummaries),
       },
       reflect: { maxLessons, minDuplicateJaccard: minDup, decisions },
+      forget: { windowDays: dayKey('windowDays'), minAgeDays: dayKey('minAgeDays'), exemptKinds: [...new Set(exemptRaw as string[])] },
     },
     evidence: parseEvidence(section(raw, 'evidence', ['dir', 'sources', 'maxFileMB', 'maxRecordBytes'], false), vaultPath, stateDir, home),
   };

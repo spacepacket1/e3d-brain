@@ -3,6 +3,9 @@
 
 import * as path from 'node:path';
 import { ConfigError, ensureStateDir, loadConfig, type EnvOptions } from '../config.js';
+import { JOURNAL_PRUNE_JOB } from '../cognition/jobs/forget.js';
+import { CognitionError, runJob } from '../cognition/run.js';
+import { closeIndex, openIndex } from '../index/indexer.js';
 import { importAgentWorkspace } from '../journal/import.js';
 import { pruneJournal } from '../journal/prune.js';
 import { SafePathError } from '../safe-path.js';
@@ -26,7 +29,29 @@ function configError(cmd: string, err: unknown): CommandResult {
   return { code: 1, stdout: '', stderr: `ebrain ${cmd}: ${err instanceof ConfigError ? 'config: ' : ''}${message(err)}\n` };
 }
 
-export function runJournal(args: readonly string[], opts: JournalCommandOptions = {}): CommandResult {
+/** `journal.pruneRequiresReview`: expired entries become `archive` proposals (the `forget` mechanism); nothing moves until `ebrain review accept`. */
+async function pruneForReview(config: ReturnType<typeof loadConfig>['config'], dryRun: boolean, opts: JournalCommandOptions): Promise<CommandResult> {
+  let h: ReturnType<typeof openIndex> | undefined;
+  try {
+    const stateDir = ensureStateDir(config);
+    h = openIndex({ vaultPath: config.vaultPath, stateDir });
+    const r = await runJob({ config, stateDir, index: h, job: JOURNAL_PRUNE_JOB, dryRun, ...(opts.now === undefined ? {} : { now: opts.now }) });
+    const c = (k: string): number => r.record.counts[k] ?? 0;
+    const lines = r.created.map((p) => `proposed archive ${p.id} ${p.path}`);
+    lines.push(
+      `journal prune: ${dryRun ? `${c('would_create')} would be proposed` : `${c('created')} archive proposals created`}, ${c('duplicates')} already in _inbox/, ` +
+        `${c('rejected_skipped')} previously rejected (journal.pruneRequiresReview is true: nothing moves until reviewed; nothing is ever deleted)`,
+    );
+    if (c('created') > 0) lines.push('review with: ebrain review list');
+    return { code: 0, stdout: `${lines.join('\n')}\n`, stderr: '' };
+  } catch (err) {
+    return { code: 1, stdout: '', stderr: `ebrain journal: ${err instanceof SafePathError || err instanceof CognitionError ? message(err) : `failed: ${message(err)}`}\n` };
+  } finally {
+    if (h !== undefined) closeIndex(h);
+  }
+}
+
+export async function runJournal(args: readonly string[], opts: JournalCommandOptions = {}): Promise<CommandResult> {
   const [sub, ...rest] = args;
   if (sub !== 'prune') {
     return { code: 2, stdout: '', stderr: `ebrain journal: ${sub === undefined ? 'missing subcommand' : `unknown subcommand ${JSON.stringify(sub)}`}\n${JOURNAL_USAGE}\n` };
@@ -34,12 +59,14 @@ export function runJournal(args: readonly string[], opts: JournalCommandOptions 
   const extra = rest.filter((a) => a !== '--dry-run');
   if (extra.length > 0 || rest.length > 1) return { code: 2, stdout: '', stderr: `ebrain journal: unexpected argument ${JSON.stringify(extra[0] ?? rest[1])}\n${JOURNAL_USAGE}\n` };
   const dryRun = rest.includes('--dry-run');
-  let vaultPath: string;
+  let config: ReturnType<typeof loadConfig>['config'];
   try {
-    vaultPath = loadConfig(opts).config.vaultPath;
+    config = loadConfig(opts).config;
   } catch (err) {
     return configError('journal', err);
   }
+  const vaultPath = config.vaultPath;
+  if (config.journal.pruneRequiresReview) return pruneForReview(config, dryRun, opts);
   try {
     const r = pruneJournal(vaultPath, { dryRun, ...(opts.now === undefined ? {} : { now: opts.now() }) });
     const verb = dryRun ? 'would archive' : 'archived';
