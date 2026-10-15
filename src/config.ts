@@ -39,6 +39,26 @@ export interface Config {
   inbox: InboxConfig;
   cognition: CognitionConfig;
   evidence: EvidenceConfig;
+  /** Read-only mirrors of outside Markdown folders into the vault (`ebrain sync`). */
+  mirrors: MirrorConfig[];
+}
+
+/**
+ * A mirror: an outside folder of Markdown (a repo's docs) copied, scrubbed and stamped with its provenance into the
+ * vault under `into` by the owner-run `ebrain sync`. The source is only ever read; nothing is deleted from either side.
+ * Mirrors come from this file only (never from a tool argument) and need a human principal.
+ */
+export interface MirrorConfig {
+  /** Short id, also the default `into` folder name and the `source_repo` stamped on each note. */
+  name: string;
+  /** Absolute (or `~/`) folder to read. Must not be inside the vault or state directory. */
+  path: string;
+  /** Vault-relative folder the notes are written under (default `repos/<name>`). */
+  into: string;
+  /** Extra directory names to skip, on top of the built-in list (node_modules, .git, logs, reports, ...). */
+  exclude: string[];
+  /** Largest source file copied, in KB (larger files are skipped and counted). */
+  maxFileKB: number;
 }
 
 /**
@@ -251,6 +271,18 @@ export const DEFAULT_EVIDENCE_MAX_RECORD_BYTES = 8192;
 export const MIN_EVIDENCE_RECORD_BYTES = 256;
 export const MAX_EVIDENCE_RECORD_BYTES = 65_536;
 export const MAX_EVIDENCE_SOURCES = 64;
+
+export const MAX_MIRRORS = 100;
+export const DEFAULT_MIRROR_MAX_FILE_KB = 400;
+export const MAX_MIRROR_FILE_KB = 2048;
+/** Directory names a mirror never descends into (any directory starting with `.` is skipped too). */
+export const MIRROR_BUILTIN_EXCLUDES: readonly string[] = [
+  'node_modules', 'output', 'logs', 'dist', '.next', 'venv', '__pycache__', 'fixtures', 'reports', 'summaries', 'coverage',
+  'build', 'debates',
+];
+const MIRROR_NAME_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+/** Vault folders with a fixed meaning; a mirror may not write into them. */
+const MIRROR_RESERVED_ROOTS: readonly string[] = ['_inbox', '_raw', '_archive', 'journal', 'references'];
 /** Upper bounds for `refs.*`: excerpts and hits stay short so a book cannot be dumped through `search`. */
 export const MAX_REF_EXCERPT_CHARS = 1000;
 export const MAX_REF_HITS = 20;
@@ -366,7 +398,7 @@ function isInsideLexical(parent: string, child: string): boolean {
 export function parseConfig(raw: unknown, opts: { homeDir?: string } = {}): Config {
   const home = opts.homeDir ?? os.homedir();
   if (!isObject(raw)) throw new ConfigError('config must be a JSON object');
-  checkKeys(raw, ['vaultPath', 'stateDir', 'principal', 'mode', 'limits', 'network', 'scrub', 'embeddings', 'audit', 'journal', 'refs', 'hooks', 'llm', 'recallLog', 'queryLog', 'rank', 'inbox', 'cognition', 'evidence'], '');
+  checkKeys(raw, ['vaultPath', 'stateDir', 'principal', 'mode', 'limits', 'network', 'scrub', 'embeddings', 'audit', 'journal', 'refs', 'hooks', 'llm', 'recallLog', 'queryLog', 'rank', 'inbox', 'cognition', 'evidence', 'mirrors'], '');
 
   const vaultPath = expandHome(requiredStr(raw, 'vaultPath', 'vaultPath'), 'vaultPath', home);
   const stateDir = expandHome(str(raw, 'stateDir', 'stateDir') ?? DEFAULT_STATE_DIR, 'stateDir', home);
@@ -590,7 +622,62 @@ export function parseConfig(raw: unknown, opts: { homeDir?: string } = {}): Conf
       forget: { windowDays: dayKey('windowDays'), minAgeDays: dayKey('minAgeDays'), exemptKinds: [...new Set(exemptRaw as string[])] },
     },
     evidence: parseEvidence(section(raw, 'evidence', ['dir', 'sources', 'maxFileMB', 'maxRecordBytes'], false), vaultPath, stateDir, home),
+    mirrors: parseMirrors(raw['mirrors'], vaultPath, stateDir, home, type),
   };
+}
+
+function parseMirrors(value: unknown, vaultPath: string, stateDir: string, home: string, principalType: PrincipalType): MirrorConfig[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) throw new ConfigError('config key "mirrors" must be an array');
+  if (value.length > MAX_MIRRORS) throw new ConfigError(`config key "mirrors" has more than ${MAX_MIRRORS} entries`);
+  if (value.length > 0 && principalType !== 'human') {
+    throw new ConfigError('config key "mirrors" requires "principal.type": "human" (mirrors write curated notes)');
+  }
+  const out: MirrorConfig[] = [];
+  value.forEach((entry, i) => {
+    const label = `mirrors[${i}]`;
+    if (!isObject(entry)) throw new ConfigError(`config key "${label}" must be an object`);
+    checkKeys(entry, ['name', 'path', 'into', 'exclude', 'maxFileKB'], `${label}.`);
+    const name = requiredStr(entry, 'name', `${label}.name`);
+    if (!MIRROR_NAME_RE.test(name)) throw new ConfigError(`config key "${label}.name" must match ${MIRROR_NAME_RE.source}`);
+    if (out.some((m) => m.name === name)) throw new ConfigError(`config key "mirrors" lists the name "${name}" twice`);
+
+    const rawPath = requiredStr(entry, 'path', `${label}.path`);
+    if (rawPath.split('/').some((seg) => seg === '..' || seg === '.')) {
+      throw new ConfigError(`config key "${label}.path" must not contain "." or ".." segments`);
+    }
+    const src = expandHome(rawPath, `${label}.path`, home);
+    if (isInsideLexical(vaultPath, src) || isInsideLexical(src, vaultPath) || isInsideLexical(stateDir, src) || isInsideLexical(src, stateDir)) {
+      throw new ConfigError(`config key "${label}.path" must not be inside the vault or state directory, or contain them`);
+    }
+
+    const rawInto = str(entry, 'into', `${label}.into`) ?? `repos/${name}`;
+    const segs = rawInto.split('/');
+    if (rawInto === '' || path.isAbsolute(rawInto) || rawInto.includes('\\') || /[\u0000-\u001f\u007f]/.test(rawInto) ||
+        segs.some((seg) => seg === '' || seg === '.' || seg === '..' || seg.startsWith('.'))) {
+      throw new ConfigError(`config key "${label}.into" must be a plain vault-relative folder (no ".", "..", hidden, or empty segments)`);
+    }
+    if (MIRROR_RESERVED_ROOTS.includes(segs[0]!)) {
+      throw new ConfigError(`config key "${label}.into" must not be under ${MIRROR_RESERVED_ROOTS.join(', ')} (those folders have fixed meanings)`);
+    }
+    const into = segs.join('/');
+    for (const other of out) {
+      if (isInsideLexical(`/${other.into}`, `/${into}`) || isInsideLexical(`/${into}`, `/${other.into}`)) {
+        throw new ConfigError(`config key "${label}.into" overlaps the folder of mirror "${other.name}"`);
+      }
+    }
+
+    const exclude = stringArray(entry, 'exclude', `${label}.exclude`);
+    if (exclude.some((d) => d.includes('/') || d === '.' || d === '..')) {
+      throw new ConfigError(`config key "${label}.exclude" entries must be plain directory names`);
+    }
+    const maxFileKB = entry['maxFileKB'] === undefined ? DEFAULT_MIRROR_MAX_FILE_KB : entry['maxFileKB'];
+    if (typeof maxFileKB !== 'number' || !Number.isInteger(maxFileKB) || maxFileKB < 1 || maxFileKB > MAX_MIRROR_FILE_KB) {
+      throw new ConfigError(`config key "${label}.maxFileKB" must be an integer from 1 to ${MAX_MIRROR_FILE_KB}`);
+    }
+    out.push({ name, path: src, into, exclude: [...new Set(exclude)], maxFileKB });
+  });
+  return out;
 }
 
 function parseEvidence(evRaw: Json, vaultPath: string, stateDir: string, home: string): EvidenceConfig {
