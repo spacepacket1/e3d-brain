@@ -325,3 +325,21 @@ keys and invalid values are errors (I10).
 - `src/lock.ts` is the only cross-process lock (`O_EXCL` file under
   `<stateDir>/locks/`, stale after 60 seconds, broken only under a second
   exclusive breaker file so a fresh lock is never removed).
+- `ebrain eval replay` (cognition Phase 9) spawns `git` (`src/exec/git.ts`) by
+  its fixed name with argument arrays, `shell: false`, a minimal environment
+  (`PATH`, `HOME`, `LC_ALL=C`, no prompts, no optional locks), a timeout, and
+  an output cap. Only read commands run (`rev-parse`, `rev-list`, `log`,
+  `status` with `core.fsmonitor=false`, `archive`); never `worktree`,
+  `checkout`, or anything that writes to the owner's repository. Commit
+  arguments are pattern-checked and passed after `--end-of-options`. The
+  `git archive` tar stream is extracted by an in-repo reader
+  (`src/eval/tar.ts`) through `safe-path` into a private `0700` temporary
+  directory (`ebrain-replay-*` in the system temp directory): only regular
+  files and directories, never symlinks or hard links, no `..` or absolute
+  names. The temporary index and state live there and the directory is
+  removed afterwards (`removeTempDir` refuses any path it did not create).
+  Residual: which `git` runs is decided by the owner's `PATH`, and the owner's
+  global git configuration applies.
+- Shadow runs (`ebrain cognition run --shadow`) write proposals only under
+  `<stateDir>/shadow/`; they are recorded apart from real proposals in the run
+  record, so `review accept` can never authenticate one.

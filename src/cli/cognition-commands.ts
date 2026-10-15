@@ -1,6 +1,8 @@
 // `ebrain cognition run <job> [--since <date>] [--max-proposals N] [--dry-run]
-// [--reconsider] [--i-understand-data-leaves-machine]` and `ebrain cognition
-// runs [-n N]` (cognition Phase 2). Owner CLI only (C2): no MCP tool starts,
+// [--shadow] [--reconsider] [--i-understand-data-leaves-machine]`, `ebrain
+// cognition runs [-n N]` (cognition Phase 2), and `ebrain cognition report
+// [--check]` (Phase 9: online metrics from review records; `--check` exits
+// REPORT_BELOW_THRESHOLD when a job is below its kill criterion). Owner CLI only (C2): no MCP tool starts,
 // schedules, or lists jobs. Works in every instance mode (C11): proposals go
 // to `_inbox/` whatever the mode.
 
@@ -8,6 +10,7 @@ import { ConfigError, ensureStateDir, loadConfig, MAX_PROPOSALS_CEILING, type En
 import { analyzeForget, describeSignals } from '../cognition/jobs/forget.js';
 import { findJob, JOBS } from '../cognition/jobs/index.js';
 import { CognitionError, runJob } from '../cognition/run.js';
+import { buildReport, formatReport } from '../cognition/report.js';
 import { listRunRecords, type RunRecord } from '../cognition/runs.js';
 import { PromptFileError } from '../cognition/prompts.js';
 import { discoverEvidence, EvidenceError, openEvidence, type OpenEvidence } from '../evidence/store.js';
@@ -19,9 +22,10 @@ import { SafePathError } from '../safe-path.js';
 import { isIsoDate } from '../vault/parse.js';
 import type { CommandResult } from './index-commands.js';
 
-export const COGNITION_USAGE = `usage: ebrain cognition run <job> [--since <date>] [--max-proposals <n>] [--dry-run] [--reconsider] [${DATA_LEAVES_MACHINE_FLAG}]
+export const COGNITION_USAGE = `usage: ebrain cognition run <job> [--since <date>] [--max-proposals <n>] [--dry-run | --shadow] [--reconsider] [${DATA_LEAVES_MACHINE_FLAG}]
        ebrain cognition runs [-n <count>]
        ebrain cognition stats forget | usage
+       ebrain cognition report [--check]
 jobs: ${JOBS.map((j) => `${j.name} (${j.description})`).join('; ')}`;
 
 export interface CognitionCommandOptions extends EnvOptions {
@@ -31,6 +35,9 @@ export interface CognitionCommandOptions extends EnvOptions {
 function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
+
+/** `cognition report --check` exit code when a job is below its kill criterion (distinct from errors, 1, and usage, 2). */
+export const REPORT_BELOW_THRESHOLD = 3;
 
 function usage(msg: string): CommandResult {
   return { code: 2, stdout: '', stderr: `ebrain cognition: ${msg}\n${COGNITION_USAGE}\n` };
@@ -42,10 +49,11 @@ function fail(msg: string): CommandResult {
 
 function summarize(r: RunRecord, created: { id: string; path: string }[], maxPending: number): string {
   const c = (k: string) => r.counts[k] ?? 0;
-  const lines = created.map((p) => `created ${p.id} ${p.path}`);
+  const shadow = r.options.shadow === true;
+  const lines = created.map((p) => `${shadow ? 'shadow' : 'created'} ${p.id} ${shadow ? `<stateDir>/${p.path}` : p.path}`);
   lines.push(
-    `cognition run ${r.job}: run ${r.run_id}${r.options.dry_run ? ' (dry run: nothing written to the vault)' : ''}`,
-    `proposals: ${c('created')} created${r.options.dry_run ? `, ${c('would_create')} would be created` : ''}, ${c('duplicates')} already in _inbox/, ` +
+    `cognition run ${r.job}: run ${r.run_id}${r.options.dry_run ? ' (dry run: nothing written to the vault)' : ''}${shadow ? ' (shadow: proposals written to <stateDir>/shadow/, nothing to _inbox/)' : ''}`,
+    `proposals: ${c('created')} ${shadow ? 'written to <stateDir>/shadow/' : 'created'}${r.options.dry_run ? `, ${c('would_create')} would be created` : ''}, ${c('duplicates')} already in _inbox/, ` +
       `${c('rejected_skipped')} previously rejected (skipped)${r.options.reconsider ? `, ${c('reconsidered')} reconsidered` : ''}, ` +
       `${c('invalid_drafts')} invalid, ${c('scrub_rejected')} refused by the scrubber`,
   );
@@ -102,7 +110,7 @@ function summarize(r: RunRecord, created: { id: string; path: string }[], maxPen
     );
   }
   if (c('skipped_provisional') > 0) lines.push(`${c('skipped_provisional')} notes have only a provisional id and were skipped; run: ebrain ids assign`);
-  lines.push(`review with: ebrain review list`);
+  lines.push(shadow ? 'compare with what you later do by hand: ebrain cognition report' : `review with: ebrain review list`);
   return `${lines.join('\n')}\n`;
 }
 
@@ -111,11 +119,13 @@ async function runCommand(args: readonly string[], opts: CognitionCommandOptions
   let since: string | undefined;
   let maxProposals: number | undefined;
   let dryRun = false;
+  let shadow = false;
   let reconsider = false;
   let leaves = false;
   for (let i = 0; i < args.length; i++) {
     const a = args[i]!;
     if (a === '--dry-run') dryRun = true;
+    else if (a === '--shadow') shadow = true;
     else if (a === '--reconsider') reconsider = true;
     else if (a === DATA_LEAVES_MACHINE_FLAG) leaves = true;
     else if (a === '--since' || a === '--max-proposals') {
@@ -135,6 +145,7 @@ async function runCommand(args: readonly string[], opts: CognitionCommandOptions
     else return usage(`unexpected argument ${JSON.stringify(a)}`);
   }
   if (jobName === undefined) return usage('missing <job>');
+  if (dryRun && shadow) return usage('--dry-run and --shadow cannot be combined');
   const job = findJob(jobName);
   if (job === undefined) return usage(`unknown job ${JSON.stringify(jobName)}`);
 
@@ -167,7 +178,7 @@ async function runCommand(args: readonly string[], opts: CognitionCommandOptions
     // Jobs that need ground truth get it only when an evidence file is configured and readable; runJob refuses otherwise.
     if (job.evidence !== undefined && discoverEvidence(config).some((f) => f.refused === undefined)) evidence = openEvidence({ config, stateDir });
     const r = await runJob({
-      config, stateDir, index: h, job, dryRun, reconsider,
+      config, stateDir, index: h, job, dryRun, reconsider, shadow,
       ...(provider === undefined ? {} : { provider }),
       ...(evidence === undefined ? {} : { evidence }),
       ...(since === undefined ? {} : { since, sinceMs: Date.parse(since) }),
@@ -194,7 +205,7 @@ function runsCommand(args: readonly string[], opts: CognitionCommandOptions): Co
     const { config } = loadConfig(opts);
     const records = listRunRecords(ensureStateDir(config));
     const lines = records.slice(0, n).map((r) =>
-      [r.run_id, r.job, `v${r.job_version}`, r.started, r.status, `${r.proposals.length} proposals`, `stop: ${r.stop_reason ?? '-'}`, r.options.dry_run ? 'dry-run' : ''].join('\t').trimEnd());
+      [r.run_id, r.job, `v${r.job_version}`, r.started, r.status, `${r.proposals.length} proposals`, `stop: ${r.stop_reason ?? '-'}`, r.options.dry_run ? 'dry-run' : r.options.shadow === true ? `shadow (${r.shadow_proposals?.length ?? 0} proposals)` : ''].join('\t').trimEnd());
     lines.push(`${records.length} runs (records in <stateDir>/runs/)`);
     return { code: 0, stdout: `${lines.join('\n')}\n`, stderr: '' };
   } catch (err) {
@@ -276,6 +287,31 @@ function statsCommand(args: readonly string[], opts: CognitionCommandOptions): C
   }
 }
 
+function reportCommand(args: readonly string[], opts: CognitionCommandOptions): CommandResult {
+  let check = false;
+  for (const a of args) {
+    if (a === '--check' && !check) check = true;
+    else return usage(`unexpected argument ${JSON.stringify(a)}`);
+  }
+  let h: ReturnType<typeof openIndex> | undefined;
+  try {
+    const { config } = loadConfig(opts);
+    const stateDir = ensureStateDir(config);
+    h = openIndex({ vaultPath: config.vaultPath, stateDir });
+    const report = buildReport({ config, stateDir, index: h, currentVersions: new Map(JOBS.map((j) => [j.name, j.version])) });
+    const below = report.checks.filter((c) => c.verdict === 'below');
+    const stdout = formatReport(report, { check });
+    if (check && below.length > 0) {
+      return { code: REPORT_BELOW_THRESHOLD, stdout, stderr: `ebrain cognition: below kill threshold: ${below.map((c) => `${c.job} v${c.version}`).join(', ')}\n` };
+    }
+    return { code: 0, stdout, stderr: '' };
+  } catch (err) {
+    return fail(`${err instanceof ConfigError ? 'config: ' : ''}${message(err)}`);
+  } finally {
+    if (h !== undefined) closeIndex(h);
+  }
+}
+
 export async function runCognition(args: readonly string[], opts: CognitionCommandOptions = {}): Promise<CommandResult> {
   const [sub, ...rest] = args;
   switch (sub) {
@@ -285,6 +321,8 @@ export async function runCognition(args: readonly string[], opts: CognitionComma
       return runsCommand(rest, opts);
     case 'stats':
       return statsCommand(rest, opts);
+    case 'report':
+      return reportCommand(rest, opts);
     default:
       return usage(sub === undefined ? 'missing subcommand' : `unknown subcommand ${JSON.stringify(sub)}`);
   }

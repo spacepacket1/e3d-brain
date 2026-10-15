@@ -211,6 +211,8 @@ const ORDER_ALLOWED: Record<string, string> = {
   'src/review/queue.ts': 'review list in file-name order',
   'src/cognition/run.ts': 'run-record inputs and taint sources in id order',
   'src/cognition/runs.ts': 'run records newest first (ULID order)',
+  'src/cognition/report.ts': 'cognition report rows by job and version; kill-criteria window newest review first (a report, not a retrieval list)',
+  'src/cognition/outcomes.ts': 'later owner actions in path order (deterministic report output)',
   'src/cognition/prompts.ts': 'prompt versions in numeric order',
   'src/cognition/jobs/forget.ts': 'forget priority: oldest last recall first, then reference date and vault path (documented job rule)',
   'src/cognition/jobs/gaps.ts': 'gaps priority: query count, poor-result rate, cluster hash (documented job rule); token sets in canonical order',

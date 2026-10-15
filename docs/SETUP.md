@@ -412,8 +412,9 @@ start only from the owner CLI (no MCP tool starts, schedules, reviews,
 accepts, or applies anything) and work in every instance mode.
 
 ```bash
-ebrain cognition run <job> [--since <date>] [--max-proposals N] [--dry-run] [--reconsider]
+ebrain cognition run <job> [--since <date>] [--max-proposals N] [--dry-run | --shadow] [--reconsider]
 ebrain cognition runs                  # run records, newest first
+ebrain cognition report [--check]      # acceptance metrics per job (see "Cognition")
 ebrain review list                     # open typed proposals: status, type, job, authentication, taint
 ebrain review show <id>                # the proposal plus the exact change against current notes
 ebrain review diff <id>                # only the change
@@ -746,6 +747,123 @@ queries, then highest poor-result rate. A gap proposal changes nothing and
 cites no evidence; accepting only files it, and its key is the hash of the
 cluster's token set, so a rejected gap is not proposed again. The log is
 read as a whole (`--since` limits it by date).
+
+## Cognition
+
+How to run the cognition jobs (see "Cognition jobs and the review queue"
+above) on a schedule, and how to tell whether each one is worth running.
+
+**Jobs run per brain only.** A job reads one vault and writes proposals to
+that vault's `_inbox/` and records to that config's state directory. There is
+no cross-brain job: schedule each brain (yours, each agent's) separately, each
+with its own `EBRAIN_CONFIG`. Nothing is ever applied by a schedule; a
+scheduled run only fills the review queue (or, with `--shadow`, the state
+directory), and you accept or reject by hand with `ebrain review`.
+
+**Provider settings (local first).** `supersede`, `consolidate`, and
+`selftest` work without a model (`llm.provider: "none"`), `forget` and `gaps`
+never use one, and `reflect` requires one. Prefer a local OpenAI-compatible
+server on loopback:
+
+```json
+{ "llm": { "provider": "openai-compatible", "model": "qwen2.5:14b-instruct",
+           "baseUrl": "http://127.0.0.1:11434/v1", "maxCallsPerRun": 20,
+           "maxInputCharsPerRun": 200000 } }
+```
+
+`anthropic` sends note text off the machine; it needs the host in
+`network.allowedHosts` and `--i-understand-data-leaves-machine` on every
+run, so do not put it in an unattended schedule unless you mean to. For an
+agent's brain, a local model is the safe default (agent journals may hold
+strategy).
+
+**Per-run budgets.** Every run is capped: `cognition.maxProposalsPerRun`
+(or `--max-proposals`), `inbox.maxPendingProposals` (a run stops once that
+many proposals are open, so an unattended schedule cannot flood the queue),
+`llm.maxCallsPerRun`, and `llm.maxInputCharsPerRun`. A capped run exits 0
+with a partial, well-formed result and the reason in its run record. Keep the
+scheduled caps small (for example `--max-proposals 10`) so review stays
+quick. Only one run of a job at a time: an overlapping scheduled run refuses
+to start (exit 1) instead of queuing.
+
+**cron** (a person's brain; weekly jobs, the check daily):
+
+```cron
+# m h dom mon dow  command
+15 3 * * 1  EBRAIN_CONFIG=$HOME/.config/e3d-brain/config.json /usr/local/bin/ebrain cognition run supersede --max-proposals 10
+30 3 * * 1  EBRAIN_CONFIG=$HOME/.config/e3d-brain/config.json /usr/local/bin/ebrain cognition run consolidate --max-proposals 10
+45 3 1 * *  EBRAIN_CONFIG=$HOME/.config/e3d-brain/config.json /usr/local/bin/ebrain cognition run forget --max-proposals 20
+0 9 * * *   EBRAIN_CONFIG=$HOME/.config/e3d-brain/config.json /usr/local/bin/ebrain cognition report --check > /dev/null || echo "a cognition job is below its kill threshold" | mail -s ebrain "$USER"
+```
+
+For an **agent's brain**, run the same commands as the agent's OS user with
+the agent's config, for example `reflect` after new outcomes are imported:
+
+```cron
+0 4 * * *   EBRAIN_CONFIG=/home/ebrain/agent-a/config.json /usr/bin/node /opt/e3d-brain/dist/src/cli/main.js evidence import /home/ebrain/exports/outcomes.jsonl && EBRAIN_CONFIG=/home/ebrain/agent-a/config.json /usr/bin/node /opt/e3d-brain/dist/src/cli/main.js cognition run reflect --max-proposals 5
+```
+
+**launchd** (macOS): one plist per job in `~/Library/LaunchAgents/`, for
+example `com.e3d-brain.supersede.plist`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.e3d-brain.supersede</string>
+  <key>ProgramArguments</key><array>
+    <string>/usr/local/bin/node</string><string>/Users/you/e3d-brain/dist/src/cli/main.js</string>
+    <string>cognition</string><string>run</string><string>supersede</string><string>--max-proposals</string><string>10</string>
+  </array>
+  <key>EnvironmentVariables</key><dict><key>EBRAIN_CONFIG</key><string>/Users/you/.config/e3d-brain/config.json</string></dict>
+  <key>StartCalendarInterval</key><dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>3</integer><key>Minute</key><integer>15</integer></dict>
+  <key>StandardErrorPath</key><string>/Users/you/Library/Logs/e3d-brain-supersede.log</string>
+</dict></plist>
+```
+
+Load it with `launchctl load ~/Library/LaunchAgents/com.e3d-brain.supersede.plist`.
+An agent's brain gets its own plists with its own `EBRAIN_CONFIG`.
+
+**Is a job worth it? Online metrics.** `ebrain cognition report` prints,
+per job and job version: proposals created, accepted, edited then accepted,
+rejected, stale, pending, and missing; the acceptance rate (accepted, edited
+or not, over reviewed); the median time from proposal to review; and a tally
+of rejection reasons (the `--reason` you gave `review reject`, normalized).
+All of it is counted from review records: the run records under
+`<stateDir>/runs/` and the proposal files in `_inbox/`, `_inbox/_applied/`
+(an `edited` stamp is added by `review edit`), and `_inbox/_rejected/`; never
+from model output. `ebrain cognition report --check` also applies each job's
+kill criterion from `docs/COGNITION-EVAL.md` and **exits 3** when a job is
+below it (1 on errors), so a cron line can alert. Acceptance rate is the
+primary signal that a job is worth its cost.
+
+**Shadow mode.** `ebrain cognition run <job> --shadow` runs the job normally
+but writes its proposals to `<stateDir>/shadow/<run-id>/` instead of
+`_inbox/`: no review work and no vault change. Shadow proposals are recorded
+apart from real ones and can never be accepted. Later, `cognition report`
+compares them with what you did by hand (best-effort, structural: a shadow
+proposal to supersede, archive, or demote a note counts when that note now
+has that status; a proposed lesson or summary counts when a note of that kind,
+created since, cites the same evidence). Flood control does not apply to
+shadow runs; `--max-proposals` does.
+
+**Replay evaluation (vault in git).** `ebrain eval replay --job <job> --at
+<commit-or-date>` asks what the job would have proposed back then and whether
+you did it afterwards. It extracts the vault at that commit (and at HEAD)
+with `git archive` into a private temporary directory, builds a temporary
+index and state directory there (never your `stateDir`; recall records up to
+that time are copied in for `forget`), runs the job in shadow mode with the
+clock at the commit time, and counts its proposals against the changes made
+between that commit and HEAD (notes later superseded, archived, demoted,
+merged, lessons and summaries written): precision (proposals matching a later
+action) and recall (later actions of the kinds the job proposes that it
+proposed). The temporary directory is removed afterwards; your repository
+and working tree are never touched (no `worktree`, no `checkout`). It needs a
+clean git history: the vault inside a git repository with commits, not a
+shallow clone, and no uncommitted changes to tracked files under the vault.
+Otherwise it exits 1 with "replay evaluation needs the vault in a git
+repository with a clean history (...); only online metrics are available:
+ebrain cognition report".
 
 ## Evidence files (thesis and outcome records)
 
@@ -1243,7 +1361,8 @@ For agents and headless use (for example on AWS):
 4. Put the state dir on a **local** filesystem (not NFS/EFS), mode `0700`
    (`ebrain init` creates it so).
 5. Sync the vault with git (clone it into the user's home; pull/commit on a
-   schedule). The server never runs git itself.
+   schedule). The server never runs git itself (only the owner command
+   `ebrain eval replay` reads the history, see "Cognition").
 6. Obsidian is not installed on servers; `ebrain` only reads and writes
    plain Markdown.
 7. Run `ebrain doctor --strict` as that user before wiring the agent's MCP
@@ -1252,6 +1371,7 @@ For agents and headless use (for example on AWS):
 ## Vault versioning
 
 Keeping the vault in `git` is recommended for diffing and rolling back what an
-agent recorded. `ebrain` never runs git itself. Imported conversations live
+agent recorded. `ebrain` never changes your repository; only `ebrain eval
+replay` reads its history (read-only `git` commands, see "Cognition"). Imported conversations live
 in `_raw/` inside the vault, so a vault in git (or any sync tool) carries
 them too; add `_raw/` to `.gitignore` if you do not want that.

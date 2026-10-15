@@ -617,7 +617,8 @@ export function editQueued(env: ReviewQueueEnv, id: string): { id: string; chang
       throw new ReviewError('targets, evidence, proposal_key, proposal_type, job, id, and op targets are immutable; reject and re-run instead. Nothing was changed');
     }
     if (!readVault(env, l.path).raw.equals(l.raw)) throw new ReviewError(`${l.path} changed while it was being edited; nothing was changed`);
-    writeAtomic(resolveInVault(env.vaultPath, l.path), edited);
+    // `edited` lets `ebrain cognition report` count edited-then-accepted proposals (cognition Phase 9).
+    writeAtomic(resolveInVault(env.vaultPath, l.path), editFrontmatter(edited, { edited: isoSeconds(now(env)) }));
     refreshIndex(env.index);
     return { id, changed: true };
   } finally {

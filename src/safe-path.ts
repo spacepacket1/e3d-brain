@@ -12,6 +12,7 @@
 // the parent directory's realpath immediately before publishing.
 
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { randomBytes } from 'node:crypto';
 
@@ -695,4 +696,29 @@ export function ensureOwnerDir(absPath: string): SafePath {
   const st = fs.lstatSync(target);
   if (st.isSymbolicLink() || !st.isDirectory()) fail('invalid', 'not a real directory');
   return brand(fs.realpathSync(target));
+}
+
+/** Temporary trees (`ebrain eval replay`) are always named like this, directly in the system temp directory. */
+const TEMP_PREFIX_RE = /^ebrain-[a-z0-9-]{1,32}-$/;
+
+/** Create a private (0700) temporary directory `<os.tmpdir()>/<prefix>XXXXXX`; `prefix` is `ebrain-<name>-`. Returns its realpath. */
+export function makeTempDir(prefix: string): SafePath {
+  if (!TEMP_PREFIX_RE.test(prefix)) fail('invalid', 'temporary directory prefix must look like ebrain-<name>-');
+  const dir = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), prefix));
+  fs.chmodSync(dir, DIR_MODE);
+  return brand(fs.realpathSync(dir));
+}
+
+/**
+ * Remove a tree made by `makeTempDir` (and nothing else): the path must sit
+ * directly in the system temp directory with an `ebrain-<name>-` name.
+ */
+export function removeTempDir(dir: SafePath): void {
+  const tmp = fs.realpathSync(os.tmpdir());
+  const base = path.basename(dir);
+  if (path.dirname(dir) !== tmp || !/^ebrain-[a-z0-9-]{1,32}-[A-Za-z0-9]{6}$/.test(base)) fail('invalid', 'refusing to remove a directory that makeTempDir did not create');
+  const st = fs.lstatSync(dir, { throwIfNoEntry: false });
+  if (st === undefined) return;
+  if (st.isSymbolicLink() || !st.isDirectory()) fail('invalid', 'refusing to remove: not a real directory');
+  fs.rmSync(dir, { recursive: true, force: true });
 }

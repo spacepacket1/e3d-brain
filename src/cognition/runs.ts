@@ -15,6 +15,8 @@ import { ulid, ULID_RE } from '../mcp/ulid.js';
 import { mkdirSafe, readDirSafe, readFileSafe, resolveInState, statSafe, writeAtomic, type SafePath } from '../safe-path.js';
 
 export const RUNS_DIR = 'runs';
+/** Shadow-mode proposals (cognition Phase 9): `<stateDir>/shadow/<run-id>/<proposal-id>.md`. */
+export const SHADOW_DIR = 'shadow';
 const RUN_FILE_RE = /^([0-9A-HJKMNP-TV-Z]{26})\.json$/;
 
 export interface RunProposalEntry {
@@ -33,7 +35,8 @@ export interface RunRecord {
   started: string;
   finished: string | null;
   status: 'running' | 'finished' | 'failed';
-  options: { since: string | null; max_proposals: number; dry_run: boolean; reconsider: boolean };
+  /** `shadow` (cognition Phase 9) is absent on older records (false). */
+  options: { since: string | null; max_proposals: number; dry_run: boolean; reconsider: boolean; shadow?: boolean };
   budget: { max_llm_calls: number; max_input_chars: number; max_proposals: number; max_pending: number };
   /** Input notes by assigned id and rev, and a SHA-256 over the sorted list. */
   inputs: { count: number; sha256: string; notes: { id: string; rev: string }[] };
@@ -41,6 +44,12 @@ export interface RunRecord {
   stop_reason: string | null;
   llm_requests: LlmRequestLog[];
   proposals: RunProposalEntry[];
+  /**
+   * Shadow runs (cognition Phase 9) only: proposals written to
+   * `<stateDir>/shadow/<run-id>/` instead of `_inbox/`. Kept apart from
+   * `proposals`, so a shadow proposal is never authenticated for accept.
+   */
+  shadow_proposals?: (RunProposalEntry & { file: string })[];
 }
 
 export function newRunId(now: Date): string {
@@ -87,4 +96,26 @@ export function findProposalRun(stateDir: SafePath, id: string): { run: RunRecor
     }
   }
   return undefined;
+}
+
+/** Write one shadow proposal (never into the vault); returns its state-relative path. */
+export function writeShadowProposal(stateDir: SafePath, runId: string, id: string, text: string): string {
+  if (!ULID_RE.test(runId) || !ULID_RE.test(id)) throw new Error('run and proposal ids must be ULIDs');
+  const rel = `${SHADOW_DIR}/${runId}/${id}.md`;
+  mkdirSafe(resolveInState(stateDir, `${SHADOW_DIR}/${runId}`));
+  // Proposal ids are unique per run, so this never replaces another proposal.
+  writeAtomic(resolveInState(stateDir, rel), text);
+  return rel;
+}
+
+/** The text of a shadow proposal recorded by `run`, or undefined when it is gone or unreadable. */
+export function readShadowProposal(stateDir: SafePath, run: RunRecord, id: string): string | undefined {
+  if (!ULID_RE.test(run.run_id) || !ULID_RE.test(id)) return undefined;
+  const file = resolveInState(stateDir, `${SHADOW_DIR}/${run.run_id}/${id}.md`);
+  if (statSafe(file)?.isFile() !== true) return undefined;
+  try {
+    return readFileSafe(file, 'utf8');
+  } catch {
+    return undefined;
+  }
 }

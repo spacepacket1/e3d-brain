@@ -3,6 +3,7 @@
 
 import { runAudit } from './audit-commands.js';
 import { runCognition } from './cognition-commands.js';
+import { runEval } from './eval-commands.js';
 import { runEvidence } from './evidence-commands.js';
 import { runDoctor } from './doctor.js';
 import { runInbox } from './inbox-commands.js';
@@ -80,13 +81,21 @@ commands:
   undo <operation-id>
                     restore the files an owner command rewrote, created, or moved (refuses if any was edited since)
   undo --list       list undo operations (machine-local, under <stateDir>/undo/)
-  cognition run <job> [--since <date>] [--max-proposals <n>] [--dry-run] [--reconsider] [--i-understand-data-leaves-machine]
+  cognition run <job> [--since <date>] [--max-proposals <n>] [--dry-run | --shadow] [--reconsider] [--i-understand-data-leaves-machine]
                     run a cognition job (built in: selftest); writes typed proposals to _inbox/ and a run
-                    record to <stateDir>/runs/ (one run per job at a time; never applies anything)
+                    record to <stateDir>/runs/ (one run per job at a time; never applies anything);
+                    --shadow writes the proposals to <stateDir>/shadow/ instead (no review work)
   cognition runs [-n <count>]
                     list run records
   cognition stats forget | usage
                     print forget candidates, or the per-note usage rollup (writes nothing to the vault)
+  cognition report [--check]
+                    per job and version: proposals created, accepted, edited then accepted, rejected, stale,
+                    median time to review, rejection reasons, and shadow-run matches (from review records);
+                    --check exits 3 when a job is below its kill criterion (docs/COGNITION-EVAL.md)
+  eval replay --job <job> --at <commit|date> [--max-proposals <n>] [--i-understand-data-leaves-machine]
+                    replay a job on the vault as of a git commit (temporary copy and state, shadow mode) and
+                    count its proposals against what you changed afterwards (needs a clean git history)
   review list       list typed proposals waiting in _inbox/ (with authentication and taint)
   review show <id> | review diff <id>
                     print a proposal and the exact change against current note contents
@@ -225,6 +234,8 @@ export function main(argv: readonly string[]): number | Promise<number> {
       return emit(runReview(rest));
     case 'evidence':
       return emit(runEvidence(rest));
+    case 'eval':
+      return runEval(rest).then(emit);
     case 'undo':
       return emit(runUndo(rest));
     case 'recalls':

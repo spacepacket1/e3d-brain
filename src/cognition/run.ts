@@ -18,6 +18,12 @@
 //     and only then creates the file in `_inbox/` (C1, any mode: C11);
 //   - writes `<stateDir>/runs/<run-id>.json` with ids, revs, hashes, counts,
 //     and settings only.
+//
+// Shadow mode (`--shadow`, cognition Phase 9) runs the same pipeline but
+// writes each proposal to `<stateDir>/shadow/<run-id>/` instead of `_inbox/`
+// and records it under `shadow_proposals` (never `proposals`, so it can never
+// be accepted). It creates no review work, so flood control
+// (`inbox.maxPendingProposals`) does not apply; `--max-proposals` does.
 
 import { createHash } from 'node:crypto';
 import { parseCitation } from '../cite/citation.js';
@@ -39,7 +45,7 @@ import { scrub, scrubVersion } from '../scrub/index.js';
 import { splitFrontmatter } from '../vault/parse.js';
 import { loadPrompt } from './prompts.js';
 import { rejectedKeys } from './rejections.js';
-import { newRunId, writeRunRecord, type RunRecord } from './runs.js';
+import { newRunId, SHADOW_DIR, writeRunRecord, writeShadowProposal, type RunRecord } from './runs.js';
 
 export class CognitionError extends Error {
   constructor(message: string) {
@@ -122,11 +128,14 @@ export interface RunOptions {
   maxProposals?: number;
   dryRun?: boolean;
   reconsider?: boolean;
+  /** Write proposals to `<stateDir>/shadow/<run-id>/` instead of `_inbox/` (see the module comment). */
+  shadow?: boolean;
   now?: () => Date;
 }
 
 export interface RunResult {
   record: RunRecord;
+  /** Vault paths, or state-relative paths for a shadow run. */
   created: { id: string; path: string }[];
 }
 
@@ -173,6 +182,8 @@ export async function runJob(opts: RunOptions): Promise<RunResult> {
   const { config, job, stateDir } = opts;
   const clock = opts.now ?? (() => new Date());
   const now = clock();
+  const shadow = opts.shadow === true;
+  if (shadow && opts.dryRun === true) throw new CognitionError('--shadow and --dry-run cannot be combined');
   let lock: ReturnType<typeof acquireLock>;
   try {
     lock = acquireLock(stateDir, `cognition-${job.name}`, { waitMs: 0 });
@@ -209,7 +220,7 @@ export async function runJob(opts: RunOptions): Promise<RunResult> {
       started: isoSeconds(now),
       finished: null,
       status: 'running',
-      options: { since: opts.since ?? null, max_proposals: maxProposals, dry_run: opts.dryRun === true, reconsider: opts.reconsider === true },
+      options: { since: opts.since ?? null, max_proposals: maxProposals, dry_run: opts.dryRun === true, reconsider: opts.reconsider === true, shadow },
       budget: {
         max_llm_calls: config.llm.maxCallsPerRun, max_input_chars: config.llm.maxInputCharsPerRun, max_proposals: maxProposals,
         max_pending: config.inbox.maxPendingProposals,
@@ -219,6 +230,7 @@ export async function runJob(opts: RunOptions): Promise<RunResult> {
       stop_reason: null,
       llm_requests: [],
       proposals: [],
+      ...(shadow ? { shadow_proposals: [] } : {}),
     };
     const scrubText = (text: string): string | undefined => {
       const r = scrub(text, { principal: { type: config.principal.type }, extraPatterns: config.scrub.extraPatterns });
@@ -291,7 +303,7 @@ export async function runJob(opts: RunOptions): Promise<RunResult> {
           stop = 'max-proposals';
           break;
         }
-        if (state.pending >= config.inbox.maxPendingProposals) {
+        if (!shadow && state.pending >= config.inbox.maxPendingProposals) {
           stop = 'max-pending';
           break;
         }
@@ -345,6 +357,13 @@ export async function runJob(opts: RunOptions): Promise<RunResult> {
         state.keys.add(key);
         if (opts.dryRun === true) {
           count('would_create');
+          continue;
+        }
+        if (shadow) {
+          const entry = { id, proposal_key: key, digest, file: `${SHADOW_DIR}/${record.run_id}/${id}.md` };
+          record.shadow_proposals!.push(entry);
+          flush();
+          created.push({ id, path: writeShadowProposal(stateDir, record.run_id, id, text) });
           continue;
         }
         // Recorded before the file exists, so every proposal on disk is authenticated by a record.
