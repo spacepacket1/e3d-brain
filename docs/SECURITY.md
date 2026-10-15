@@ -1,5 +1,16 @@
 # e3d-brain Security
 
+## Reporting a vulnerability
+
+Please report security problems privately, not in a public issue. Use GitHub's
+private vulnerability reporting: on the repository page choose **Security**, then
+**Report a vulnerability**. Include what you found, how to reproduce it, and which
+invariant below it breaks. You will get a reply within a few days.
+
+This project was written by AI and has not had a human security audit. Reports that
+break a stated invariant (I1 and the rest below) are the most useful, and are
+fixed first.
+
 ## Invariants
 
 These are copied verbatim from `docs/e3d-brain-spec.md` ("Shared Constraints").
