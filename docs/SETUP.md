@@ -147,7 +147,12 @@ In `journal` mode `search` and `list_notes` also accept `include_expired?`
   matching, ranked by BM25, and the response header carries
   `match_mode: "any_term"` so the caller knows the results are looser. Notes
   that match every word always rank ahead of a fallback (the fallback only runs
-  when there are none). Book search (`scope: refs`) gets the filler-word and
+  when there are none). A hyphenated or dotted name such as `e3d-agent` or
+  `e3d.ai` is searched as a phrase, not as separate words. A note is also found
+  by its title, its heading and its file path: a word in the title counts five
+  times a body word (on the note's opening chunk only), a heading word one and a
+  half times, a path word twice, so "what is e3d-agent" finds the note named
+  e3d-agent before a passage that merely mentions it often. Book search (`scope: refs`) gets the filler-word and
   any-word behaviour but not stemming. Upgrading from an older build changes
   the index schema, so the index rebuilds itself on the next run (it is derived
   data). `advanced: true` passes the query to FTS5

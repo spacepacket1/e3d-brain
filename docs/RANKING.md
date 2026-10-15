@@ -104,3 +104,13 @@ self-reported events never are, because an agent can claim anything.
 This amends I11 for this feature only: with the option on, the order is
 deterministic for a fixed vault, config, **and counter state**. With the
 default (off) it remains a pure function of vault and config.
+
+## Relevance within a tier
+
+Inside a tier, results are ordered by BM25 (quantized to 1e-6, then path and ordinal). The FTS index has four
+columns: the chunk text, the note title, the chunk's heading path, and the note's file path, with BM25 weights
+`1.0, 5.0, 1.5, 2.0` (`BM25_WEIGHTS` in `src/index/query.ts`). Title and path are indexed on a note's opening chunk only,
+so a note's shortest chunk cannot win on the note's name. Plain-word queries drop filler words, keep hyphenated or dotted
+names as phrases, and fall back to any-word matching (response header `match_mode: "any_term"`) only when no visible note
+matches every word. The index tokenizer is `porter unicode61` (English stemming). Changing any of this bumps the index
+schema version, and an older index rebuilds itself.

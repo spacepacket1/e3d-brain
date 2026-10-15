@@ -181,10 +181,13 @@ function insertNote(db: Db, p: Prepared, provId: string): void {
   db.prepare(`INSERT INTO notes (${NOTE_COLUMNS.join(', ')}) VALUES (${NOTE_COLUMNS.map(() => '?').join(', ')})`).run(...values);
 
   const chunk = db.prepare('INSERT INTO chunks (note_path, ordinal, heading_path, text, chunk_rev) VALUES (?, ?, ?, ?, ?)');
-  const fts = db.prepare('INSERT INTO chunks_fts (rowid, text) VALUES (?, ?)');
+  const fts = db.prepare('INSERT INTO chunks_fts (rowid, text, title, headings, path) VALUES (?, ?, ?, ?, ?)');
   for (const c of n.chunks) {
     const info = chunk.run(p.relPath, c.ordinal, canonicalJson(c.headingPath), c.text, revOf(c.text));
-    fts.run(info.lastInsertRowid, c.text);
+    // Title and path boost only the note's lead chunk (its overview); otherwise a note's shortest chunk ("License")
+    // would win on the note's name. Headings belong to their own chunk.
+    const lead = c.ordinal === 0;
+    fts.run(info.lastInsertRowid, c.text, lead ? n.title : '', c.headingPath.join(' '), lead ? p.relPath.replace(/\.md$/i, '') : '');
   }
   const link = db.prepare(
     "INSERT INTO links (note_path, ordinal, line, target, anchor, alias, embed, resolved_path, resolution, candidates) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, 'unresolved', 0)",

@@ -29,6 +29,11 @@ describe('search terms (unit)', () => {
     assert.equal(ftsQueryAny('memory'), undefined);
     assert.equal(ftsQueryAny('who memory'), undefined, 'one content word is not a looser query');
   });
+  it('keeps hyphenated and dotted names as one term, so they are searched as phrases', () => {
+    assert.deepEqual(searchTerms('what is e3d-agent'), ['e3d-agent']);
+    assert.deepEqual(searchTerms('e3d.ai stories, e3d-corp.'), ['e3d.ai', 'stories', 'e3d-corp']);
+    assert.equal(ftsQuery('what is e3d-agent'), '"e3d-agent"');
+  });
   it('FTS syntax in text stays inert', () => {
     // every word is a quoted term, so NEAR/OR/* cannot act as operators ("OR" is a filler word and is dropped)
     assert.equal(ftsQuery('a OR "b" NEAR c*'), '"b" "NEAR" "c"');
@@ -51,6 +56,10 @@ describe('search recall (integration)', () => {
     fs.writeFileSync(path.join(vault, 'notes', 'Advisory.md'),
       '# Advisory memory\n\nMemory is advisory and never approves spending or signing.\n');
     fs.writeFileSync(path.join(vault, 'notes', 'Pasta.md'), '# Dinner\n\nBoil water, add salt, cook the pasta.\n');
+    fs.writeFileSync(path.join(vault, 'notes', 'Quokka.md'), '# Quokka Service\n\nThis service runs nightly.\n');
+    fs.writeFileSync(path.join(vault, 'notes', 'Operations.md'), `# Operations\n\n${'The quokka rota covers the service desk. '.repeat(6)}\n`);
+    fs.writeFileSync(path.join(vault, 'notes', 'Scaffold.md'), '# Scaffold\n\ne3d-agent is a reference scaffold.\n');
+    fs.writeFileSync(path.join(vault, 'notes', 'Trading.md'), '# Trading\n\nThe scout agent watches the e3d trading floor.\n');
     stateDir = path.join(base, 'state');
     config = path.join(base, 'config.json');
     fs.writeFileSync(config, JSON.stringify({ vaultPath: vault, stateDir, principal: { id: 'tester', type: 'human' }, mode: 'inbox' }), { mode: 0o600 });
@@ -115,6 +124,22 @@ describe('search recall (integration)', () => {
     const a = paths(await m.call('search', { query: 'memory proposals human' }));
     const b = paths(await m.call('search', { query: 'memory proposals human' }));
     assert.deepEqual(a, b);
+  });
+
+  it('finds a note by a word that appears only in its title', async () => {
+    const r = await m.call('search', { query: 'quokka' });
+    assert.ok(paths(r).includes('notes/Quokka.md'), 'Quokka.md never says "quokka" in its body, only in its title');
+  });
+
+  it('a title match outranks a note that merely repeats the word', async () => {
+    const r = await m.call('search', { query: 'what is the quokka service' });
+    assert.equal(paths(r)[0], 'notes/Quokka.md');
+  });
+
+  it('a hyphenated name is searched as a phrase: "e3d-agent" does not match "e3d" and "agent" far apart', async () => {
+    const r = await m.call('search', { query: 'e3d-agent' });
+    assert.deepEqual(paths(r), ['notes/Scaffold.md']);
+    assert.equal(mode(r), undefined);
   });
 
   it('an index built with the old tokenizer rebuilds itself and then stems', async () => {
