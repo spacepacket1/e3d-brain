@@ -11,6 +11,21 @@ This project was written by AI and has not had a human security audit. Reports t
 break a stated invariant (I1 and the rest below) are the most useful, and are
 fixed first.
 
+## Known gaps
+
+Found by an independent adversarial review on 2026-10-15 and not fixed yet. Listed so you can judge them:
+
+- **The scrubber is a heuristic.** A credential obfuscated on purpose (a zero-width character inside a token, a secret
+  split across the title, body and sources, or spaced-out letters) can pass the credential detectors. In that case
+  only the high-entropy fallback may redact part of it. Do not rely on it against a hostile writer.
+- **Inbox `capture` has no rate or total-size limit** (journal mode does). A misbehaving agent can fill the disk.
+- **Citation grounding is not verified.** A journal `lesson` with any well-formed `thesis:`, `outcome:` or `commit:`
+  source ranks as cited. This is documented in `docs/RANKING.md`.
+
+Fixed from the same review: a cubic-time regex that let one `capture` freeze the server and the indexer, terminal
+escape sequences in `inbox show` and `review show` output, and wallet-key detection when the label is on the
+previous line.
+
 ## Invariants
 
 These are copied verbatim from `docs/e3d-brain-spec.md` ("Shared Constraints").

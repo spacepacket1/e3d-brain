@@ -223,7 +223,7 @@ function awsSecretPick(original: string): (m: RegExpExecArray) => boolean {
 
 const RE_HEX64 = /(?<![0-9A-Za-z])(?:0x)?[0-9a-fA-F]{64}(?![0-9A-Za-z])/g;
 /** Key-context words; a 64-hex string counts as a private key only near one of these (same line). */
-const KEY_CONTEXT = /priv|secret|seed|mnemonic|key\s*=/i;
+const KEY_CONTEXT = /priv|secret|seed|mnemonic|key\s*=|\bpk\b|signer|deployer|(?:wallet|signing)[ \t]+key/i;
 export const KEY_CONTEXT_BEFORE = 40;
 export const KEY_CONTEXT_AFTER = 20;
 
@@ -232,7 +232,14 @@ function detectHexKeys(masked: string, original: string, protectedMask: string):
     // Never inside a well-formed citation.
     if (protectedMask.charCodeAt(m.index) === 0) return false;
     const { pre, post } = lineAround(original, m.index, m.index + m[0].length, KEY_CONTEXT_BEFORE, KEY_CONTEXT_AFTER);
-    return KEY_CONTEXT.test(pre) || KEY_CONTEXT.test(post);
+    if (KEY_CONTEXT.test(pre) || KEY_CONTEXT.test(post)) return true;
+    // A label on the previous line ("my wallet key" / a JSON key split across lines) counts when the hex starts its line.
+    const lineStart = original.lastIndexOf('\n', m.index - 1) + 1;
+    if (lineStart > 0 && /^[\s"'`]*$/.test(original.slice(lineStart, m.index))) {
+      const prevStart = original.lastIndexOf('\n', lineStart - 2) + 1;
+      return KEY_CONTEXT.test(original.slice(Math.max(prevStart, lineStart - 1 - KEY_CONTEXT_BEFORE), lineStart - 1));
+    }
+    return false;
   });
 }
 
