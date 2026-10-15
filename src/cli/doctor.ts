@@ -13,6 +13,7 @@ import { randomBytes } from 'node:crypto';
 import { duplicateIds, missingIdentities } from '../index/identity.js';
 import { closeIndex, indexExists, indexTotals, openIndex, refreshIndex } from '../index/indexer.js';
 import { checkFts5 } from '../index/sqlite.js';
+import { mirrorSummary } from '../mirror/sync.js';
 import { findCollisions } from '../vault/names.js';
 import { scanVault } from '../vault/scan.js';
 import { ConfigError, ensureStateDir, loadConfig, type Config, type EnvOptions } from '../config.js';
@@ -120,6 +121,22 @@ function checkStateDir(config: Config, lines: string[], vaultDev: number | undef
     ok = false;
   }
   return ok;
+}
+
+/** How fresh each configured mirror is, from the sync state file alone (no source walk): warnings only, never a failure. */
+const MIRROR_STALE_DAYS = 7;
+function checkMirrors(config: Config, lines: string[]): void {
+  if (config.mirrors.length === 0) return;
+  try {
+    for (const s of mirrorSummary({ config, stateDir: ensureStateDir(config) })) {
+      if (s.lastSync === null) lines.push(`mirror ${s.name}: WARN never synced (run \`ebrain sync ${s.name}\`)`);
+      else if (s.ageDays !== null && s.ageDays > MIRROR_STALE_DAYS) {
+        lines.push(`mirror ${s.name}: WARN last sync ${s.ageDays} days ago (${s.tracked} notes); run \`ebrain sync ${s.name}\``);
+      } else lines.push(`mirror ${s.name}: last sync ${s.lastSync.slice(0, 10)} (${s.tracked} notes)`);
+    }
+  } catch (err) {
+    lines.push(`mirrors: WARN could not read sync state: ${message(err)}`);
+  }
 }
 
 /** Show at most this many entries per list. */
@@ -281,6 +298,7 @@ export function runDoctor(opts: EnvOptions & { strict?: boolean } = {}): DoctorR
   ok &&= vault.ok;
   ok &&= checkStateDir(config, lines, vault.dev);
   if (vault.ok) ok = checkIndex(config, lines) && ok;
+  if (vault.ok) checkMirrors(config, lines);
 
   const hosts = config.network.allowedHosts;
   lines.push(hosts.length === 0 ? 'network: disabled' : `network: allowed hosts ${hosts.join(', ')}`);

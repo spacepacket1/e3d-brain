@@ -343,3 +343,9 @@ keys and invalid values are errors (I10).
 - Shadow runs (`ebrain cognition run --shadow`) write proposals only under
   `<stateDir>/shadow/`; they are recorded apart from real proposals in the run
   record, so `review accept` can never authenticate one.
+- Mirrors (`ebrain sync`, I1, I5): the source folders are named in the config file only (never by an MCP tool), must not
+  overlap the vault or state directory, and are read through `safe-path` (realpath containment, symlinks not followed,
+  per-file size cap, dot-directories and a built-in exclude list skipped). Every document is scrubbed before it is written
+  and the report prints counts and source paths, never values. The destination folder cannot be `_inbox`, `_raw`,
+  `_archive`, `journal`, or `references`. A human principal is required, nothing is deleted on either side, and `git` is
+  never run (the commit is read from `.git`).

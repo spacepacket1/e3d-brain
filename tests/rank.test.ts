@@ -223,6 +223,7 @@ const ORDER_ALLOWED: Record<string, string> = {
   'src/cognition/dedup.ts': 'duplicate pairs by Jaccard, then keys (documented deterministic output order)',
   'src/cognition/jobs/reflect.ts': 'reflect priority: latest outcome date, then thesis id or decision path (documented job rule); sources newest first, lessons and citations in canonical order',
   'src/cognition/jobs/consolidate.ts': 'consolidate priority: overlap, then paths (documented job rule); cluster members and ids in canonical order',
+  'src/mirror/sync.ts': 'source directory entries in byte order and the orphan list in path order (deterministic sync report, not retrieval)',
   'src/evidence/record.ts': 'attribute keys in canonical (sorted) order',
   'src/evidence/source.ts': 'evidence kinds in name order; list in (occurred, id) time order',
   'src/evidence/store.ts': 'evidence files in load order (dir by name); kinds by name; list in (occurred, id) time order',

@@ -1024,6 +1024,44 @@ vault. If the vault is synced (iCloud, Dropbox, Syncthing) or kept in git,
 so are your conversations. Exclude `_raw/` from sync or git if that is not
 what you want; the scrubber is heuristic and can miss secrets.
 
+## Mirrors (keeping repo docs in the vault)
+
+A mirror copies an outside folder of Markdown (a repo's README and docs) into the vault as curated reference notes, so
+the brain can search them. The brain cannot follow live links (it only reads its own vault and state folder), so a mirror
+is a **copy with provenance**, refreshed on demand. Add mirrors to the config file (never a tool argument; a human
+principal is required):
+
+```json
+{
+  "mirrors": [
+    { "name": "e3d-corp", "path": "~/e3d-corp" },
+    { "name": "e3d", "path": "~/e3d", "into": "repos/e3d", "exclude": ["client", "buildDB"], "maxFileKB": 400 }
+  ]
+}
+```
+
+- `name`: `a-z0-9._-`, also the default folder (`repos/<name>`) and the `source_repo` stamped on each note.
+- `path`: the folder to read. It may not be inside the vault or the state directory, or contain them.
+- `into`: the vault folder to write under (plain relative path; not under `_inbox`, `_raw`, `_archive`, `journal`, or
+  `references`; mirrors may not overlap).
+- `exclude`: extra directory names to skip, on top of `node_modules`, `logs`, `reports`, `dist`, `fixtures`, `debates`,
+  `summaries`, `build`, and every dot-directory. `maxFileKB`: larger files are skipped and counted.
+
+```bash
+ebrain sync --dry-run          # what would change; writes nothing
+ebrain sync                    # all mirrors   (or: ebrain sync e3d-corp)
+ebrain mirrors status          # new, changed, and vanished source files since the last sync (read-only)
+```
+
+Each note is stamped with `mirror`, `source_repo`, `source_path`, `source_commit` (read from `.git`, git is never run),
+and `source_sha256`, and is `pinned: true` so the cognition jobs leave it alone (it is regenerated from the source).
+Every file passes through the secret scrubber first; the report lists counts and the *source paths* that had
+credential-class findings so you can check the source, never the values. A re-run changes nothing when the source did not:
+ids from `ebrain ids assign` and the original `created` date are preserved. Nothing is ever deleted: a note whose source file
+vanished is reported as orphaned and kept. **Do not hand-edit mirrored notes** (a re-sync overwrites the edit); put your own
+notes elsewhere, for example `notes/`. `ebrain doctor` warns when a mirror was never synced or is more than 7 days old. To
+keep mirrors fresh, schedule `ebrain sync` (for example daily from cron) with `EBRAIN_CONFIG` set.
+
 ## Reference library (books)
 
 Owner CLI commands (never MCP) that add books you choose to a searchable,

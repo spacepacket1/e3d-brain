@@ -4,6 +4,7 @@
 import { runAudit } from './audit-commands.js';
 import { runCognition } from './cognition-commands.js';
 import { runEval } from './eval-commands.js';
+import { runMirrors, runSync } from './mirror-commands.js';
 import { runEvidence } from './evidence-commands.js';
 import { runDoctor } from './doctor.js';
 import { runInbox } from './inbox-commands.js';
@@ -110,6 +111,12 @@ commands:
                     validate a thesis/outcome JSONL export and write its scrubbed records into evidence.dir (atomic)
   evidence stats    per-file record and skipped-line counts for the local evidence index (<stateDir>/evidence.db)
   evidence reindex  rebuild <stateDir>/evidence.db from the evidence files
+  sync [<mirror>...] [--dry-run]
+                    copy configured outside Markdown folders (config "mirrors") into the vault: scrubbed, stamped with
+                    their source repo, path and commit, ids preserved; nothing is deleted on either side
+  mirrors list      the configured mirrors
+  mirrors status [<mirror>...]
+                    compare each source with the last sync: new, changed, gone, and how stale (read-only)
   recalls prune [--older-than <days>]
                     drop recall records older than recallLog.retentionDays (default 180) from <stateDir>/recalls.jsonl
   queries prune [--older-than <days>]
@@ -234,6 +241,10 @@ export function main(argv: readonly string[]): number | Promise<number> {
       return emit(runReview(rest));
     case 'evidence':
       return emit(runEvidence(rest));
+    case 'sync':
+      return emit(runSync(rest));
+    case 'mirrors':
+      return emit(runMirrors(rest));
     case 'eval':
       return runEval(rest).then(emit);
     case 'undo':
