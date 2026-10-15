@@ -149,7 +149,8 @@ describe('index over the fixture vault', () => {
       assert.deepEqual(matchChunks(h.db, 'zebrafinch').map((m) => m.path), ['Bad Frontmatter.md']);
       assert.deepEqual(matchChunks(h.db, 'okapi').map((m) => m.path), ['Unclosed Frontmatter.md']);
       // The malformed (closed) YAML block of Bad Frontmatter.md is not indexed as body.
-      assert.deepEqual(matchChunks(h.db, 'unclosed').map((m) => m.path), ['Unclosed Frontmatter.md']);
+      // (The word is also in this note's title and path, so its opening chunk matches too: compare distinct notes.)
+      assert.deepEqual([...new Set(matchChunks(h.db, 'unclosed').map((m) => m.path))], ['Unclosed Frontmatter.md']);
       // FTS syntax in user text is inert.
       assert.deepEqual(matchChunks(h.db, 'zebrafinch OR "NEAR(" *'), []);
       assert.deepEqual(matchChunks(h.db, '"zebrafinch"'), matchChunks(h.db, 'zebrafinch'));

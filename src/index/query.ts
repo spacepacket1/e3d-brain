@@ -16,7 +16,8 @@ const STOPWORDS = new Set([
  * A query made only of stopwords keeps them, so it still searches for something.
  */
 export function searchTerms(text: string): string[] {
-  const words = text.normalize('NFC').match(/[\p{L}\p{N}\p{M}_]+/gu) ?? [];
+  // A hyphenated or dotted name (e3d-agent, e3d.ai) stays one term, so it is searched as a phrase (adjacent words).
+  const words = text.normalize('NFC').match(/[\p{L}\p{N}\p{M}_]+(?:[-.][\p{L}\p{N}\p{M}_]+)*/gu) ?? [];
   const seen = new Set<string>();
   const all: string[] = [];
   for (const w of words) {
@@ -123,6 +124,13 @@ export interface ChunkHit extends NoteRow {
 }
 
 /**
+ * BM25 column weights for chunks_fts (text, title, headings, path): a word in a note's title counts five times a
+ * word in the body, in a heading one and a half times, in the path twice. This is what lets "what is e3d-agent" find the note
+ * called e3d-agent before a chunk that merely mentions it a lot.
+ */
+export const BM25_WEIGHTS = '1.0, 5.0, 1.5, 2.0';   // title and path apply to a note's lead chunk only (see indexer)
+
+/**
  * Every chunk matching an FTS5 query (already escaped by `ftsQuery`, or the
  * caller's own syntax in advanced mode), with its BM25 value and a short
  * snippet. Throws the SQLite error for invalid FTS syntax.
@@ -131,7 +139,7 @@ export function searchChunks(db: Db, match: string): ChunkHit[] {
   return db
     .prepare(
       `SELECT ${NOTE_SELECT}, c.ordinal AS ordinal, c.heading_path AS heading_path, c.text AS text,
-         snippet(chunks_fts, 0, '', '', '...', 32) AS snippet, bm25(chunks_fts) AS bm25
+         snippet(chunks_fts, 0, '', '', '...', 32) AS snippet, bm25(chunks_fts, ${BM25_WEIGHTS}) AS bm25
        FROM chunks_fts JOIN chunks c ON c.id = chunks_fts.rowid JOIN notes n ON n.path = c.note_path
        WHERE chunks_fts MATCH ?`,
     )
