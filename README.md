@@ -199,6 +199,21 @@ node dist/src/cli/main.js init --vault ~/Brain --principal you
 node dist/src/cli/main.js doctor --strict
 ```
 
+### Try it in five minutes
+
+```bash
+node dist/src/cli/main.js init --vault ~/Brain --principal you      # prints the MCP snippet and writes a config
+mkdir -p ~/Brain/notes
+printf '# Why we chose Postgres\n\nPostgres over MySQL for JSONB and row-level security.\n' > ~/Brain/notes/postgres.md
+export EBRAIN_CONFIG=<the config path init printed>
+node dist/src/cli/main.js reindex
+node examples/search-eval/ask.mjs "why did we pick postgres"          # same search an MCP client calls
+```
+
+Then register the server with Claude using the snippet `init` printed, and ask Claude the same question.
+To score search quality on your own notes, write questions and the notes that should answer them,
+then run `examples/search-eval/eval.mjs` (see the comments at the top of that file).
+
 `init` prints the snippet to register the server with Claude Code or Claude
 Desktop. A first cognition run, with nothing applied until you say so:
 
