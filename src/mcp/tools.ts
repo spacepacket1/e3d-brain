@@ -16,7 +16,7 @@
 import { formatCitation, type NoteCitation } from '../cite/citation.js';
 import { refreshIndex, MAX_NOTE_BYTES, type IndexHandle } from '../index/indexer.js';
 import {
-  allNoteRows, chunkHitsByKeys, firstChunkText, ftsQuery, neighbours, noteRowByPath, searchChunks, tagsByPath, type NoteRow,
+  allNoteRows, chunkHitsByKeys, firstChunkText, ftsQuery, ftsQueryAny, neighbours, noteRowByPath, searchChunks, tagsByPath, type NoteRow,
 } from '../index/query.js';
 import { chunkKey, effectiveTier, fuseRrf, HIDDEN_STATUSES, nearestChunks, rank, type RankItem, type TierOrHidden } from '../index/rank.js';
 import { normalize, scoreVectors, scrubbedForEmbedding } from '../index/vectors.js';
@@ -105,7 +105,7 @@ function limitSchema(l: { default: number; max: number }): Schema {
 export const SEARCH_SCHEMA: ObjectSchema = {
   type: 'object',
   properties: {
-    query: { type: 'string', minLength: 1, maxLength: 1000, description: 'Search text (BM25 full-text).' },
+    query: { type: 'string', minLength: 1, maxLength: 1000, description: 'Search text (BM25 full-text). Plain words work best, and filler words (who, how, the) are ignored. If no note contains every word, the search retries with any word matching and sets match_mode: "any_term".' },
     limit: limitSchema(SEARCH_LIMIT),
     tags: { type: 'array', items: TAG_SCHEMA, minItems: 1, maxItems: 20, description: 'Only notes with all of these tags.' },
     folder: FOLDER_SCHEMA,
@@ -595,6 +595,16 @@ async function search(env: ReadToolEnv, args: Record<string, unknown>, maxChars:
     isVisible(h, vis) &&
     (tagMap === undefined || tags.every((t) => (tagMap.get(h.path) ?? []).includes(t)));
   let candidates = hits.filter(wanted);
+  // Nothing visible matched every word: retry with any word matching (ranked by BM25) and say so in the response.
+  let matchMode: 'any_term' | undefined;
+  if (candidates.length === 0 && !advanced && match !== undefined && scope !== 'refs') {
+    const anyMatch = ftsQueryAny(query);
+    if (anyMatch !== undefined) {
+      hits = searchChunks(db, anyMatch);
+      candidates = hits.filter(wanted);
+      if (candidates.length > 0) matchMode = 'any_term';
+    }
+  }
   let fused: Map<string, number> | undefined;
   let embeddings: string | undefined;
   if (env.embedder !== undefined && !advanced && match !== undefined && scope !== 'refs') {
@@ -623,7 +633,15 @@ async function search(env: ReadToolEnv, args: Record<string, unknown>, maxChars:
       ...(fused === undefined ? {} : { fused: fused.get(chunkKey({ path: h.path, ordinal: h.ordinal })) ?? 0 }),
       ...(usageNet === undefined ? {} : { usageNet: usageNet.get((h as NoteRow).id) ?? 0 }),
     }));
-  const refs = match !== undefined && (scope === 'refs' || scope === 'all') ? refCandidates(env, match, advanced) : [];
+  let refs = match !== undefined && (scope === 'refs' || scope === 'all') ? refCandidates(env, match, advanced) : [];
+  if (refs.length === 0 && match !== undefined && !advanced && (scope === 'refs' || scope === 'all')) {
+    const anyMatch = ftsQueryAny(query);
+    const looser = anyMatch === undefined ? [] : refCandidates(env, anyMatch, advanced);
+    if (looser.length > 0) {
+      refs = looser;
+      matchMode = 'any_term';
+    }
+  }
   // Notes first, then books (rank.ts); at most `limit` notes and min(limit, refs.maxHits) book passages.
   const ranked = rank<RankItem & { row?: NoteRow; hit?: (typeof hits)[number]; ref?: RefHit }>([...notes, ...refs], { includeHidden: true, ...(env.usageBoost === true ? { usageBoost: true } : {}) });
   const refLimit = Math.min(limit, env.refs?.maxHits ?? 0);
@@ -649,6 +667,7 @@ async function search(env: ReadToolEnv, args: Record<string, unknown>, maxChars:
   const extra: Record<string, unknown> = { matched: notes.length + refs.length };
   if (scope !== 'notes') extra['scope'] = scope;
   if (embeddings !== undefined) extra['embeddings'] = embeddings;
+  if (matchMode !== undefined) extra['match_mode'] = matchMode;
   const result = listResponse('search', format, items, maxChars, { ...extra, ...proposedNotice(noteRows, noteRows.length < kept.length) });
   if (env.queryLog !== undefined && result.recall_id !== undefined) {
     const top = kept[0]?.tier;

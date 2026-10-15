@@ -140,8 +140,17 @@ In `journal` mode `search` and `list_notes` also accept `include_expired?`
   before it or `valid_from` after it, and shows a superseded/archived note if
   its `superseded_at`/`archived_at` is later than `as_of`. Dates without a
   time zone are UTC; a bare `valid_until` date includes that whole day.
-- Search is BM25 (SQLite FTS5). The query is plain words (all must match);
-  FTS syntax in it is inert. `advanced: true` passes the query to FTS5
+- Search is BM25 (SQLite FTS5) with English word stemming, so `accept proposal`
+  finds `accepts proposals`. The query is plain words: filler words (`who`,
+  `how`, `the`, ...) are ignored and the rest must all match; FTS syntax in it
+  is inert. If no visible note has every word, the search retries with any word
+  matching, ranked by BM25, and the response header carries
+  `match_mode: "any_term"` so the caller knows the results are looser. Notes
+  that match every word always rank ahead of a fallback (the fallback only runs
+  when there are none). Book search (`scope: refs`) gets the filler-word and
+  any-word behaviour but not stemming. Upgrading from an older build changes
+  the index schema, so the index rebuilds itself on the next run (it is derived
+  data). `advanced: true` passes the query to FTS5
   unescaped (`OR`, `NOT`, `"phrases"`, `prefix*`); invalid syntax returns an
   `invalid` error.
 - `path` arguments are vault-relative and checked by `safe-path`: absolute
