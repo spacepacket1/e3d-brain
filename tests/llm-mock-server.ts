@@ -14,6 +14,13 @@
 // Cognition `selftest` requests (a `Note text:` block) get `{"items": [...]}`:
 // one valid item plus one schema-invalid item, or only an invalid item when
 // the note text contains MOCK-INVALID.
+//
+// Cognition `supersede` requests (`Older note text:` / `Newer note text:`
+// blocks) get one verdict. The relation comes from a `mock:<relation>` token
+// in either note (`supersedes`, `conflicts`, `compatible`, `unrelated`;
+// default `unrelated`); `mock:badquote` answers `supersedes` with a newer
+// quote that is in neither note, and `mock:invalid` answers a schema-invalid
+// item. Quotes are the first sentence of each note's first prose line.
 
 import * as fs from 'node:fs';
 import * as http from 'node:http';
@@ -41,8 +48,41 @@ const KINDS: [RegExp, string][] = [
   [/\bidea\b/i, 'idea'],
 ];
 
+function noteBlock(user: string, label: string): string {
+  const m = new RegExp(`\\n?${label} note text:\\n(\`{3,})text\\n([\\s\\S]*?)\\n\\1`).exec(user);
+  return m === null ? '' : m[2]!;
+}
+
+function firstSentence(text: string): string {
+  for (const raw of text.split('\n')) {
+    const line = raw.trim();
+    if (line === '' || line.startsWith('#') || line.startsWith('<!--') || line.includes('mock:')) continue;
+    const dot = line.indexOf('. ');
+    return dot === -1 ? line : line.slice(0, dot + 1);
+  }
+  return '';
+}
+
+function supersedeReply(user: string): string {
+  const older = noteBlock(user, 'Older');
+  const newer = noteBlock(user, 'Newer');
+  const token = /mock:([a-z]+)/.exec(`${newer}\n${older}`)?.[1] ?? 'unrelated';
+  if (token === 'invalid') return JSON.stringify({ items: [{ relation: 'replaces', older_quote: 1 }] });
+  const relation = token === 'badquote' ? 'supersedes' : token;
+  const quoted = relation === 'supersedes' || relation === 'conflicts';
+  return JSON.stringify({
+    items: [{
+      relation,
+      older_quote: quoted ? firstSentence(older) : '',
+      newer_quote: token === 'badquote' ? 'We never wrote this sentence in any note.' : quoted ? firstSentence(newer) : '',
+      reason: `Mock verdict: ${relation}.`,
+    }],
+  });
+}
+
 /** The JSON reply text for a user message holding a `Turn <n> (<role>):` transcript. */
 export function mockReply(user: string): string {
+  if (/(?:^|\n)Older note text:\n/.test(user)) return supersedeReply(user);
   const note = /\nNote title: ([^\n]*)\n\nNote text:\n/.exec(user);
   if (note !== null) {
     if (user.includes('MOCK-INVALID')) return JSON.stringify({ items: [{ reason: 7, extra: true }] });

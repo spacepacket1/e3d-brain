@@ -50,6 +50,16 @@ function summarize(r: RunRecord, created: { id: string; path: string }[], maxPen
   lines.push(`stop: ${r.stop_reason}`);
   if (r.stop_reason === 'max-pending') lines.push(`the inbox holds ${maxPending} or more open proposals (inbox.maxPendingProposals); review some, then re-run`);
   if (r.stop_reason === 'max-proposals') lines.push(`reached --max-proposals / cognition.maxProposalsPerRun (${r.options.max_proposals}); re-run for more`);
+  if (r.job === 'supersede') {
+    lines.push(
+      `supersede: ${c('candidates')} candidate pairs from ${c('eligible_notes')} notes; skipped ${c('skipped_pinned')} with a pinned older note, ${c('skipped_same_date')} with equal dates, ${c('skipped_undated')} undated notes`,
+    );
+    if (r.provider !== null) {
+      lines.push(`verdicts: ${c('relation_supersedes')} supersedes, ${c('relation_conflicts')} conflicts, ${c('relation_compatible')} compatible, ${c('relation_unrelated')} unrelated; ${c('quotes_unverified')} dropped (quotes not verbatim), ${c('no_verdict')} without a valid verdict`);
+    } else {
+      lines.push(`no LLM provider: proposals are marked needs_review: unadjudicated (cap cognition.supersede.maxUnadjudicated; ${c('unadjudicated_capped')} pairs over the cap)`);
+    }
+  }
   if (c('skipped_provisional') > 0) lines.push(`${c('skipped_provisional')} notes have only a provisional id and were skipped; run: ebrain ids assign`);
   lines.push(`review with: ebrain review list`);
   return `${lines.join('\n')}\n`;

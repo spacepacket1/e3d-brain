@@ -22,6 +22,7 @@
 //   taint_sources: [<citation>, ...]
 //   confidence: unrated
 //   proposal_key: pk_<32 hex>
+//   needs_review: unadjudicated  (optional: no model judged it; supersede without a provider)
 //   scrubVersion: <n>
 //   ---
 //   # <title>
@@ -82,6 +83,10 @@ export const SETTABLE_STATUSES = ['accepted', 'superseded', 'archived', 'stale']
 export const PROPOSAL_STATUSES = ['proposed', 'stale', 'accepted', 'rejected'] as const;
 export type ProposalStatus = (typeof PROPOSAL_STATUSES)[number];
 
+/** Values of the optional `needs_review` flag. */
+export const NEEDS_REVIEW_VALUES = ['unadjudicated'] as const;
+export type NeedsReview = (typeof NEEDS_REVIEW_VALUES)[number];
+
 export const CHANGE_FENCE_INFO = 'ebrain-change';
 export const CHANGE_VERSION = 1;
 export const PROPOSAL_KEY_RE = /^pk_[0-9a-f]{32}$/;
@@ -131,6 +136,8 @@ export interface ProposalMeta {
   taint_sources: string[];
   confidence: 'unrated';
   proposal_key: string;
+  /** Set when no model adjudicated the proposal (descriptive; not an immutable field). */
+  needs_review?: NeedsReview;
 }
 
 export interface ParsedProposal {
@@ -368,6 +375,10 @@ export function parseProposal(text: string): ParsedProposal {
   const evidence = citationList(fm['evidence'], 'evidence', MAX_EVIDENCE);
   const taint = citationList(fm['taint_sources'] ?? [], 'taint_sources', MAX_EVIDENCE);
   const created = typeof fm['created'] === 'string' ? fm['created'] : '';
+  const needsReview = fm['needs_review'];
+  if (needsReview !== undefined && (typeof needsReview !== 'string' || !(NEEDS_REVIEW_VALUES as readonly string[]).includes(needsReview))) {
+    throw new ProposalError(`needs_review must be one of ${NEEDS_REVIEW_VALUES.join(', ')}`);
+  }
   const block = extractChangeBlock(split.body);
   const ops = parseChangeJson(block.json, type as ProposalType, targets);
   return {
@@ -376,6 +387,7 @@ export function parseProposal(text: string): ParsedProposal {
       job, job_version: jobVersion, created, author: typeof fm['author'] === 'string' ? fm['author'] : '',
       origin: typeof fm['origin'] === 'string' ? fm['origin'] : '', targets, evidence, untrusted_origin: untrusted, taint_sources: taint,
       confidence: 'unrated', proposal_key: key,
+      ...(needsReview === undefined ? {} : { needs_review: needsReview as NeedsReview }),
     },
     ops,
     body: split.body,
@@ -453,11 +465,13 @@ export function renderProposalNote(r: RenderInput): string {
     taint_sources: [...m.taint_sources],
     confidence: 'unrated',
     proposal_key: m.proposal_key,
+    ...(m.needs_review === undefined ? {} : { needs_review: m.needs_review }),
     scrubVersion: r.scrubVersion,
   };
   const yaml = stringify(fm, { lineWidth: 0 });
   const rationale = r.rationale.replace(/\r\n?/g, '\n').trim();
-  const banner = m.untrusted_origin ? '> **Untrusted origin:** derived from untrusted sources; check them before accepting.\n\n' : '';
+  const banner = (m.untrusted_origin ? '> **Untrusted origin:** derived from untrusted sources; check them before accepting.\n\n' : '') +
+    (m.needs_review === 'unadjudicated' ? '> **Needs review (unadjudicated):** no model judged this pair; read both notes before accepting.\n\n' : '');
   return [
     `---\n${yaml}---`,
     `# ${m.title}`,

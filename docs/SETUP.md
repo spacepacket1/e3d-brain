@@ -206,6 +206,8 @@ Optional keys may be omitted to take their defaults.
 | `llm.timeoutMs` | no | `120000` | integer 1000-600000; per-call timeout |
 | `recallLog.retentionDays` | no | `180` | integer 1-36500; `ebrain recalls prune` drops recall records older than this |
 | `inbox.maxPendingProposals` | no | `50` | integer 1-10000; a cognition run stops creating proposals once this many typed proposals are open (`status: proposed`) in `_inbox/` |
+| `cognition.supersede.minJaccard` | no | `0.5` | number above 0, at most 1; `supersede` pairs two notes of the same kind (`decision`, `preference`, `fact`) when their 3-word-shingle Jaccard similarity is at least this |
+| `cognition.supersede.maxUnadjudicated` | no | `5` | integer 1-10000; without an LLM provider, at most this many `supersede` candidate pairs become `needs_review: unadjudicated` proposals per run |
 | `cognition.maxProposalsPerRun` | no | `20` | integer 1-10000; most proposals one cognition run creates (`--max-proposals` overrides); LLM caps are `llm.maxCallsPerRun` and `llm.maxInputCharsPerRun` |
 | `evidence.dir` | no | `<stateDir>/evidence` | absolute or `~/`; not inside the vault (or containing it) and not the state directory itself; `evidence import` writes here and every `*.jsonl` in it is loaded |
 | `evidence.sources` | no | `[]` | up to 64 `.jsonl` files (absolute or `~/`, no `.`/`..` segments), outside the vault and the state directory; read-only, loaded before `evidence.dir` |
@@ -404,8 +406,10 @@ ebrain review undo <id>                # restore what accept changed
 ebrain review recover                  # finish or roll back an interrupted accept
 ```
 
-The built-in job today is `selftest`: it proposes demoting (`status: stale`)
-every curated note tagged `#ebrain-selftest`, so you can try the whole flow.
+Built-in jobs: `selftest` proposes demoting (`status: stale`) every curated
+note tagged `#ebrain-selftest`, so you can try the whole flow; `supersede`
+proposes marking older notes superseded by newer ones (see "The supersede
+job" below).
 Jobs only use notes with an assigned `id`; notes with only a provisional id
 are skipped and counted, and the run tells you to run `ebrain ids assign`.
 
@@ -482,6 +486,39 @@ proposal with `status: proposed`. `targets`, `evidence`, `proposal_key`,
 runs skip a rejected key unless you pass `--reconsider`. `ebrain inbox
 accept/reject` keep working for ordinary notes; `review` only handles
 `kind: proposal` notes from recorded runs.
+
+### The supersede job
+
+`ebrain cognition run supersede` asks "did a newer decision or fact replace
+an older one?". Candidates are found without a model: pairs of curated,
+accepted notes (no status or `status: accepted`, assigned ids) that share a
+topic signal (a tag other than generic ones such as `#todo` and `#ebrain-*`,
+carried by at most 25 notes; a wikilink in both directions; or the same
+`kind` among `decision`, `preference`, `fact` with text overlap of at least
+`cognition.supersede.minJaccard`) and have different dates (`occurred`, else
+`created`; undated notes are skipped). The later note is the newer one. A
+`pinned: true` note is never the superseded side. Pairs are proposed newest
+first (newer note's date), then by path. With `--since`, only pairs whose
+newer note is dated on or after it are considered.
+
+With an LLM provider, the model classifies each pair (`supersedes`,
+`conflicts`, `compatible`, `unrelated`) and quotes the conflicting sentence
+from each note. Each quote must appear word for word in its note, or the
+item is dropped and counted. `supersedes` yields a `supersede` proposal;
+`conflicts` yields a `gap` report (no change) asking you to decide;
+`compatible` and `unrelated` yield nothing. Without a provider, up to
+`cognition.supersede.maxUnadjudicated` pairs per run become `supersede`
+proposals marked `needs_review: unadjudicated` (flagged by `review show`),
+quoting an excerpt of each note.
+
+Accepting a `supersede` proposal sets, on the older note, `status:
+superseded`, `superseded_by: <newer id>`, and `superseded_at` and
+`valid_until` (both the newer note's date); on the newer note it adds the
+older id to `supersedes`. Search then hides the older note by default, and
+`as_of` a date before the newer note shows it again. `ebrain review undo`
+restores both notes. Pairs already proposed (open or applied) or rejected
+are skipped before any model call, so re-runs create nothing new; editing
+either note changes its revision, so the pair can be proposed again.
 
 ## Evidence files (thesis and outcome records)
 

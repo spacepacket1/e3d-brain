@@ -65,6 +65,15 @@ export interface InboxConfig {
 export interface CognitionConfig {
   /** Most proposals one run creates (`--max-proposals` overrides). */
   maxProposalsPerRun: number;
+  supersede: SupersedeConfig;
+}
+
+/** The `supersede` job's candidate thresholds (cognition Phase 4). */
+export interface SupersedeConfig {
+  /** Same-kind notes (decision, preference, fact) are a candidate pair when their 3-word-shingle Jaccard is at least this. */
+  minJaccard: number;
+  /** Without an LLM provider, at most this many candidate pairs become `needs_review: unadjudicated` proposals per run. */
+  maxUnadjudicated: number;
 }
 
 /** `<stateDir>/recalls.jsonl` (cognition Phase 1): records older than this are dropped by `ebrain recalls prune`. */
@@ -162,6 +171,8 @@ export const DEFAULT_REFS: Readonly<RefsConfig> = { excerptChars: 400, maxHits: 
 export const DEFAULT_RECALL_RETENTION_DAYS = 180;
 export const DEFAULT_MAX_PENDING_PROPOSALS = 50;
 export const DEFAULT_MAX_PROPOSALS_PER_RUN = 20;
+export const DEFAULT_SUPERSEDE_MIN_JACCARD = 0.5;
+export const DEFAULT_SUPERSEDE_MAX_UNADJUDICATED = 5;
 /** Upper bound for `inbox.maxPendingProposals`, `cognition.maxProposalsPerRun`, and `--max-proposals`. */
 export const MAX_PROPOSALS_CEILING = 10_000;
 /** `evidence.dir` default: `<stateDir>/evidence`. */
@@ -409,7 +420,14 @@ export function parseConfig(raw: unknown, opts: { homeDir?: string } = {}): Conf
     return v;
   };
   const inboxRaw = section(raw, 'inbox', ['maxPendingProposals'], false);
-  const cognitionRaw = section(raw, 'cognition', ['maxProposalsPerRun'], false);
+  const cognitionRaw = section(raw, 'cognition', ['maxProposalsPerRun', 'supersede'], false);
+  const supersedeRaw: Json = cognitionRaw.supersede === undefined ? {} : (cognitionRaw.supersede as Json);
+  if (!isObject(supersedeRaw)) throw new ConfigError('config key "cognition.supersede" must be an object');
+  checkKeys(supersedeRaw, ['minJaccard', 'maxUnadjudicated'], 'cognition.supersede.');
+  const minJaccard = supersedeRaw.minJaccard === undefined ? DEFAULT_SUPERSEDE_MIN_JACCARD : supersedeRaw.minJaccard;
+  if (typeof minJaccard !== 'number' || !Number.isFinite(minJaccard) || minJaccard <= 0 || minJaccard > 1) {
+    throw new ConfigError('config key "cognition.supersede.minJaccard" must be a number greater than 0 and at most 1');
+  }
 
   return {
     vaultPath,
@@ -427,7 +445,13 @@ export function parseConfig(raw: unknown, opts: { homeDir?: string } = {}): Conf
     llm,
     recallLog: { retentionDays },
     inbox: { maxPendingProposals: countKey(inboxRaw, 'inbox.maxPendingProposals', 'maxPendingProposals', DEFAULT_MAX_PENDING_PROPOSALS) },
-    cognition: { maxProposalsPerRun: countKey(cognitionRaw, 'cognition.maxProposalsPerRun', 'maxProposalsPerRun', DEFAULT_MAX_PROPOSALS_PER_RUN) },
+    cognition: {
+      maxProposalsPerRun: countKey(cognitionRaw, 'cognition.maxProposalsPerRun', 'maxProposalsPerRun', DEFAULT_MAX_PROPOSALS_PER_RUN),
+      supersede: {
+        minJaccard,
+        maxUnadjudicated: countKey(supersedeRaw, 'cognition.supersede.maxUnadjudicated', 'maxUnadjudicated', DEFAULT_SUPERSEDE_MAX_UNADJUDICATED),
+      },
+    },
     evidence: parseEvidence(section(raw, 'evidence', ['dir', 'sources', 'maxFileMB', 'maxRecordBytes'], false), vaultPath, stateDir, home),
   };
 }

@@ -406,6 +406,7 @@ export function showQueued(env: ReviewQueueEnv, id: string, opts: { diffOnly?: b
   if (p.meta.untrusted_origin) {
     out.push('!!! UNTRUSTED ORIGIN: derived from untrusted sources', `!!! taint sources: ${p.meta.taint_sources.join(', ') || '(none listed)'}`, '');
   }
+  if (p.meta.needs_review === 'unadjudicated') out.push('!!! NEEDS REVIEW (unadjudicated): no model judged this proposal; read the cited notes before accepting', '');
   out.push(
     `id: ${p.meta.id}`,
     `path: ${l.path}`,

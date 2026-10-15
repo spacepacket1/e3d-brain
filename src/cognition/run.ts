@@ -7,7 +7,9 @@
 //   - asks the job for drafts in its documented deterministic priority order
 //     (never by model score);
 //   - skips drafts whose proposal key (C5) is already in `_inbox/` (open or
-//     `_applied/`), and keys in `rejections.json` unless `--reconsider`;
+//     `_applied/`), and keys in `rejections.json` unless `--reconsider`
+//     (jobs may ask the same question up front with `ctx.known`, to avoid
+//     spending model calls on a pair that would be skipped anyway);
 //   - stops cleanly at `--max-proposals` (C6), at `inbox.maxPendingProposals`
 //     open proposals (flood control), or when the LLM budget runs out;
 //   - scrubs every text it writes (C7), propagates taint from untrusted
@@ -29,7 +31,7 @@ import type { ExtractionProvider } from '../llm/provider.js';
 import { acquireLock, LockError } from '../lock.js';
 import { ulid } from '../mcp/ulid.js';
 import {
-  immutableDigest, parseProposal, ProposalError, proposalKey, renderProposalNote, type ChangeOp, type ProposalTarget, type ProposalType,
+  immutableDigest, parseProposal, ProposalError, proposalKey, renderProposalNote, type ChangeOp, type NeedsReview, type ProposalTarget, type ProposalType,
 } from '../review/proposal.js';
 import { readFileWithStatSafe, resolveInVault, type SafePath } from '../safe-path.js';
 import { scrub, scrubVersion } from '../scrub/index.js';
@@ -55,6 +57,7 @@ export interface Draft {
   ops: ChangeOp[];
   untrusted_origin?: boolean;
   taint_sources?: string[];
+  needs_review?: NeedsReview;
 }
 
 export interface JobContext {
@@ -70,6 +73,13 @@ export interface JobContext {
   /** Record an input note (id and rev only). */
   input(id: string, rev: string): void;
   count(name: string, n?: number): void;
+  /**
+   * True when a draft citing `evidence` under any of `types` would be skipped:
+   * its key is already in `_inbox/` (open or applied; counted as a duplicate)
+   * or was rejected and the run has no `--reconsider` (counted as skipped).
+   * Reflects the state when the run started.
+   */
+  known(types: readonly ProposalType[], evidence: readonly string[]): boolean;
 }
 
 export interface JobOutput {
@@ -214,8 +224,22 @@ export async function runJob(opts: RunOptions): Promise<RunResult> {
     try {
       flush();
       refreshIndex(opts.index);
+      const before = inboxState(config, allNoteRows(opts.index.db));
+      const rejectedBefore = rejectedKeys(stateDir);
+      const known = (types: readonly ProposalType[], evidence: readonly string[]): boolean => {
+        const keys = types.map((t) => proposalKey(job.name, t, evidence));
+        if (keys.some((k) => before.keys.has(k))) {
+          count('duplicates');
+          return true;
+        }
+        if (opts.reconsider !== true && keys.some((k) => rejectedBefore.has(k))) {
+          count('rejected_skipped');
+          return true;
+        }
+        return false;
+      };
       const ctx: JobContext = {
-        config, index: opts.index, now, scrubText,
+        config, index: opts.index, now, scrubText, known,
         input: (id, rev) => void inputs.set(id, rev),
         count,
         ...(opts.sinceMs === undefined ? {} : { sinceMs: opts.sinceMs }),
@@ -282,6 +306,7 @@ export async function runJob(opts: RunOptions): Promise<RunResult> {
             id, title: cleanTitle(title!) || `${job.name} proposal`, proposal_type: d.proposal_type, job: job.name, job_version: job.version,
             created: isoSeconds(now), author: `ebrain-${job.name}`, origin: 'cli', targets: d.targets, evidence: d.evidence,
             untrusted_origin: d.untrusted_origin === true || taint.size > 0, taint_sources: [...taint].sort(), proposal_key: key,
+            ...(d.needs_review === undefined ? {} : { needs_review: d.needs_review }),
           },
           ops,
           rationale: rationale!,
