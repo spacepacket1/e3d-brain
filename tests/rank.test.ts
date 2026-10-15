@@ -214,6 +214,8 @@ const ORDER_ALLOWED: Record<string, string> = {
   'src/cognition/prompts.ts': 'prompt versions in numeric order',
   'src/cognition/jobs/selftest.ts': 'selftest priority: vault path order (documented job rule)',
   'src/cognition/jobs/supersede.ts': 'supersede priority: newer date, then paths (documented job rule); signals in name order',
+  'src/cognition/dedup.ts': 'duplicate pairs by Jaccard, then keys (documented deterministic output order)',
+  'src/cognition/jobs/consolidate.ts': 'consolidate priority: overlap, then paths (documented job rule); cluster members and ids in canonical order',
   'src/evidence/record.ts': 'attribute keys in canonical (sorted) order',
   'src/evidence/source.ts': 'evidence kinds in name order; list in (occurred, id) time order',
   'src/evidence/store.ts': 'evidence files in load order (dir by name); kinds by name; list in (occurred, id) time order',

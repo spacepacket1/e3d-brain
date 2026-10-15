@@ -208,6 +208,9 @@ Optional keys may be omitted to take their defaults.
 | `inbox.maxPendingProposals` | no | `50` | integer 1-10000; a cognition run stops creating proposals once this many typed proposals are open (`status: proposed`) in `_inbox/` |
 | `cognition.supersede.minJaccard` | no | `0.5` | number above 0, at most 1; `supersede` pairs two notes of the same kind (`decision`, `preference`, `fact`) when their 3-word-shingle Jaccard similarity is at least this |
 | `cognition.supersede.maxUnadjudicated` | no | `5` | integer 1-10000; without an LLM provider, at most this many `supersede` candidate pairs become `needs_review: unadjudicated` proposals per run |
+| `cognition.consolidate.minJaccard` | no | `0.5` | number above 0, at most 1; `consolidate` treats two notes as near-duplicates when their 3-word-shingle Jaccard similarity is at least this |
+| `cognition.consolidate.minCosine` | no | `0.95` | number above 0, at most 1; with embeddings on, notes whose mean stored chunk vectors have at least this cosine similarity are also near-duplicates |
+| `cognition.consolidate.maxSummaries` | no | `5` | integer 1-10000; at most this many `summary` proposals per `consolidate` run |
 | `cognition.maxProposalsPerRun` | no | `20` | integer 1-10000; most proposals one cognition run creates (`--max-proposals` overrides); LLM caps are `llm.maxCallsPerRun` and `llm.maxInputCharsPerRun` |
 | `evidence.dir` | no | `<stateDir>/evidence` | absolute or `~/`; not inside the vault (or containing it) and not the state directory itself; `evidence import` writes here and every `*.jsonl` in it is loaded |
 | `evidence.sources` | no | `[]` | up to 64 `.jsonl` files (absolute or `~/`, no `.`/`..` segments), outside the vault and the state directory; read-only, loaded before `evidence.dir` |
@@ -409,7 +412,8 @@ ebrain review recover                  # finish or roll back an interrupted acce
 Built-in jobs: `selftest` proposes demoting (`status: stale`) every curated
 note tagged `#ebrain-selftest`, so you can try the whole flow; `supersede`
 proposes marking older notes superseded by newer ones (see "The supersede
-job" below).
+job" below); `consolidate` proposes merging near-duplicate notes and
+summarizing clusters of related notes (see "The consolidate job" below).
 Jobs only use notes with an assigned `id`; notes with only a provisional id
 are skipped and counted, and the run tells you to run `ebrain ids assign`.
 
@@ -519,6 +523,52 @@ older id to `supersedes`. Search then hides the older note by default, and
 restores both notes. Pairs already proposed (open or applied) or rejected
 are skipped before any model call, so re-runs create nothing new; editing
 either note changes its revision, so the pair can be proposed again.
+
+### The consolidate job
+
+`ebrain cognition run consolidate` asks "which notes are duplicates, or one
+idea in pieces?". It considers curated notes and your own journal entries
+(`journal/<your principal id>/`) that are effectively accepted and have an
+assigned id. It skips `pinned: true` notes, `_raw/`, `_archive/`,
+`references/`, journal entries of other principals, and existing
+`kind: summary` notes.
+
+**Merge.** Near-duplicates are found without embeddings or a model: each
+note body is normalized (case, punctuation, Markdown, and HTML comments do
+not matter) and cut into 3-word shingles; a minhash signature with fixed
+seeds and LSH buckets finds candidate pairs, and a pair is a duplicate when
+its exact shingle Jaccard is at least `cognition.consolidate.minJaccard`.
+Exact copies, reworded notes, and notes with reordered sentences are found
+this way. With embeddings on, notes whose stored chunk vectors (mean per
+note) have cosine at least `cognition.consolidate.minCosine` are also
+duplicates; the job reads only vectors already in the index and never calls
+the embedding server. The proposal keeps the more complete note (more
+distinct shingles; on a tie the earlier `occurred`/`created`, then the
+smaller path), appends the other note's lines it does not already contain
+under a `## Merged from <title>` section that cites `note:<id>@<rev>`, and
+archives the other note (`status: archived`, `archived_at`, `merged_into:
+<kept id>`, moved to `_archive/<path>`, or `journal/_archive/...` for a
+journal entry). Nothing is deleted, and `ebrain review undo` restores both
+notes byte for byte. A note joins at most one merge per run.
+
+**Summary.** Three or more notes that share a tag (generic tags excluded, at
+most 25 notes) or are connected by wikilinks form a cluster. The proposal
+creates `summaries/<label>-<hash>.md` with `kind: summary` and
+`derived_from: [note:<id>@<rev>, ...]`; every line cites its source note.
+With an LLM provider, the model writes short claims, each with a quote that
+must appear word for word in the cited source, or the claim is dropped and
+counted (a cluster with no supported claim yields nothing). Without a
+provider the summary is an extractive link list: a link to each note, its
+first line verbatim, and its citation. A cluster already covered by a
+summary note (same note ids in `derived_from`) is skipped, and at most
+`cognition.consolidate.maxSummaries` summaries are proposed per run. A
+summary of any `untrusted_origin` note is itself marked untrusted, and so is
+its proposal.
+
+Proposals are ordered merges first (highest overlap, then path), then
+summaries (largest cluster, then path). With `--since`, only pairs and
+clusters with a note dated on or after it are considered. Re-runs create
+nothing new; rejected proposals are not re-proposed unless `--reconsider`.
 
 ## Evidence files (thesis and outcome records)
 

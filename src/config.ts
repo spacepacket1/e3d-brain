@@ -66,6 +66,17 @@ export interface CognitionConfig {
   /** Most proposals one run creates (`--max-proposals` overrides). */
   maxProposalsPerRun: number;
   supersede: SupersedeConfig;
+  consolidate: ConsolidateConfig;
+}
+
+/** The `consolidate` job's thresholds (cognition Phase 5). */
+export interface ConsolidateConfig {
+  /** Two notes are near-duplicates when their 3-word-shingle Jaccard (minhash candidates, exact check) is at least this. */
+  minJaccard: number;
+  /** With embeddings on, notes whose mean stored chunk vectors have cosine at least this are also near-duplicates. */
+  minCosine: number;
+  /** At most this many `summary` proposals per run. */
+  maxSummaries: number;
 }
 
 /** The `supersede` job's candidate thresholds (cognition Phase 4). */
@@ -173,6 +184,7 @@ export const DEFAULT_MAX_PENDING_PROPOSALS = 50;
 export const DEFAULT_MAX_PROPOSALS_PER_RUN = 20;
 export const DEFAULT_SUPERSEDE_MIN_JACCARD = 0.5;
 export const DEFAULT_SUPERSEDE_MAX_UNADJUDICATED = 5;
+export const DEFAULT_CONSOLIDATE: Readonly<ConsolidateConfig> = { minJaccard: 0.5, minCosine: 0.95, maxSummaries: 5 };
 /** Upper bound for `inbox.maxPendingProposals`, `cognition.maxProposalsPerRun`, and `--max-proposals`. */
 export const MAX_PROPOSALS_CEILING = 10_000;
 /** `evidence.dir` default: `<stateDir>/evidence`. */
@@ -420,7 +432,7 @@ export function parseConfig(raw: unknown, opts: { homeDir?: string } = {}): Conf
     return v;
   };
   const inboxRaw = section(raw, 'inbox', ['maxPendingProposals'], false);
-  const cognitionRaw = section(raw, 'cognition', ['maxProposalsPerRun', 'supersede'], false);
+  const cognitionRaw = section(raw, 'cognition', ['maxProposalsPerRun', 'supersede', 'consolidate'], false);
   const supersedeRaw: Json = cognitionRaw.supersede === undefined ? {} : (cognitionRaw.supersede as Json);
   if (!isObject(supersedeRaw)) throw new ConfigError('config key "cognition.supersede" must be an object');
   checkKeys(supersedeRaw, ['minJaccard', 'maxUnadjudicated'], 'cognition.supersede.');
@@ -428,6 +440,16 @@ export function parseConfig(raw: unknown, opts: { homeDir?: string } = {}): Conf
   if (typeof minJaccard !== 'number' || !Number.isFinite(minJaccard) || minJaccard <= 0 || minJaccard > 1) {
     throw new ConfigError('config key "cognition.supersede.minJaccard" must be a number greater than 0 and at most 1');
   }
+  const consolidateRaw: Json = cognitionRaw.consolidate === undefined ? {} : (cognitionRaw.consolidate as Json);
+  if (!isObject(consolidateRaw)) throw new ConfigError('config key "cognition.consolidate" must be an object');
+  checkKeys(consolidateRaw, ['minJaccard', 'minCosine', 'maxSummaries'], 'cognition.consolidate.');
+  const fraction = (key: 'minJaccard' | 'minCosine'): number => {
+    const v = consolidateRaw[key] === undefined ? DEFAULT_CONSOLIDATE[key] : consolidateRaw[key];
+    if (typeof v !== 'number' || !Number.isFinite(v) || v <= 0 || v > 1) {
+      throw new ConfigError(`config key "cognition.consolidate.${key}" must be a number greater than 0 and at most 1`);
+    }
+    return v;
+  };
 
   return {
     vaultPath,
@@ -450,6 +472,11 @@ export function parseConfig(raw: unknown, opts: { homeDir?: string } = {}): Conf
       supersede: {
         minJaccard,
         maxUnadjudicated: countKey(supersedeRaw, 'cognition.supersede.maxUnadjudicated', 'maxUnadjudicated', DEFAULT_SUPERSEDE_MAX_UNADJUDICATED),
+      },
+      consolidate: {
+        minJaccard: fraction('minJaccard'),
+        minCosine: fraction('minCosine'),
+        maxSummaries: countKey(consolidateRaw, 'cognition.consolidate.maxSummaries', 'maxSummaries', DEFAULT_CONSOLIDATE.maxSummaries),
       },
     },
     evidence: parseEvidence(section(raw, 'evidence', ['dir', 'sources', 'maxFileMB', 'maxRecordBytes'], false), vaultPath, stateDir, home),

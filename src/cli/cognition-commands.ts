@@ -60,6 +60,18 @@ function summarize(r: RunRecord, created: { id: string; path: string }[], maxPen
       lines.push(`no LLM provider: proposals are marked needs_review: unadjudicated (cap cognition.supersede.maxUnadjudicated; ${c('unadjudicated_capped')} pairs over the cap)`);
     }
   }
+  if (r.job === 'consolidate') {
+    lines.push(
+      `consolidate: ${c('eligible_notes')} notes (skipped ${c('skipped_pinned')} pinned, ${c('skipped_other_principal')} journal entries of other principals); ` +
+        `${c('duplicate_pairs')} near-duplicate pairs from ${c('dedup_candidates')} candidates (${c('merge_overlap_skipped')} overlapping another merge); ` +
+        `${c('clusters')} clusters (${c('summary_exists')} already summarized, ${c('summaries_capped')} over cognition.consolidate.maxSummaries)`,
+    );
+    if (r.provider !== null) {
+      lines.push(`claims: ${c('claims_supported')} supported, ${c('claims_unsupported')} dropped (quote not verbatim in the cited source); ${c('summary_no_supported_claims')} clusters left without a supported claim`);
+    } else {
+      lines.push('no LLM provider: summaries are extractive link lists');
+    }
+  }
   if (c('skipped_provisional') > 0) lines.push(`${c('skipped_provisional')} notes have only a provisional id and were skipped; run: ebrain ids assign`);
   lines.push(`review with: ebrain review list`);
   return `${lines.join('\n')}\n`;

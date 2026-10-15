@@ -21,6 +21,10 @@
 // default `unrelated`); `mock:badquote` answers `supersedes` with a newer
 // quote that is in neither note, and `mock:invalid` answers a schema-invalid
 // item. Quotes are the first sentence of each note's first prose line.
+//
+// Cognition `consolidate` requests (`Source [n] note text:` blocks) get one
+// claim per source quoting its first sentence; a source containing
+// `mock:badclaim` gets a claim whose quote is in no source instead.
 
 import * as fs from 'node:fs';
 import * as http from 'node:http';
@@ -80,9 +84,21 @@ function supersedeReply(user: string): string {
   });
 }
 
+function consolidateReply(user: string): string {
+  const items: unknown[] = [];
+  for (let n = 1; ; n++) {
+    const text = noteBlock(user, `Source \\[${n}\\]`);
+    if (text === '' && !user.includes(`Source [${n}] note text:`)) break;
+    const bad = text.includes('mock:badclaim');
+    items.push({ source: String(n), claim: `Source ${n} says this.`, quote: bad ? 'This sentence is not in any source note.' : firstSentence(text) });
+  }
+  return JSON.stringify({ items });
+}
+
 /** The JSON reply text for a user message holding a `Turn <n> (<role>):` transcript. */
 export function mockReply(user: string): string {
   if (/(?:^|\n)Older note text:\n/.test(user)) return supersedeReply(user);
+  if (/(?:^|\n)Source \[1\] note text:\n/.test(user)) return consolidateReply(user);
   const note = /\nNote title: ([^\n]*)\n\nNote text:\n/.exec(user);
   if (note !== null) {
     if (user.includes('MOCK-INVALID')) return JSON.stringify({ items: [{ reason: 7, extra: true }] });

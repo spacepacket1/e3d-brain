@@ -80,6 +80,8 @@ export interface JobContext {
    * Reflects the state when the run started.
    */
   known(types: readonly ProposalType[], evidence: readonly string[]): boolean;
+  /** Like `known` (and counted the same way), but says why: `open` (in `_inbox/`, open or applied) or `rejected`. */
+  knownAs(types: readonly ProposalType[], evidence: readonly string[]): 'open' | 'rejected' | undefined;
 }
 
 export interface JobOutput {
@@ -226,20 +228,21 @@ export async function runJob(opts: RunOptions): Promise<RunResult> {
       refreshIndex(opts.index);
       const before = inboxState(config, allNoteRows(opts.index.db));
       const rejectedBefore = rejectedKeys(stateDir);
-      const known = (types: readonly ProposalType[], evidence: readonly string[]): boolean => {
+      const knownAs = (types: readonly ProposalType[], evidence: readonly string[]): 'open' | 'rejected' | undefined => {
         const keys = types.map((t) => proposalKey(job.name, t, evidence));
         if (keys.some((k) => before.keys.has(k))) {
           count('duplicates');
-          return true;
+          return 'open';
         }
         if (opts.reconsider !== true && keys.some((k) => rejectedBefore.has(k))) {
           count('rejected_skipped');
-          return true;
+          return 'rejected';
         }
-        return false;
+        return undefined;
       };
+      const known = (types: readonly ProposalType[], evidence: readonly string[]): boolean => knownAs(types, evidence) !== undefined;
       const ctx: JobContext = {
-        config, index: opts.index, now, scrubText, known,
+        config, index: opts.index, now, scrubText, known, knownAs,
         input: (id, rev) => void inputs.set(id, rev),
         count,
         ...(opts.sinceMs === undefined ? {} : { sinceMs: opts.sinceMs }),
