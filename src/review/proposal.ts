@@ -62,10 +62,14 @@ export type ProposalType = (typeof PROPOSAL_TYPES)[number];
 export const OP_NAMES = ['set_frontmatter', 'create_note', 'move_note', 'append_section'] as const;
 export type OpName = (typeof OP_NAMES)[number];
 
-/** The ops each proposal type may use (a `gap` changes nothing). */
+/**
+ * The ops each proposal type may use (a `gap` changes nothing). A `supersede`
+ * may create a note only under `lessons/<principal-id>/` (the replacing
+ * lesson of a `reflect` contradiction, cognition Phase 6).
+ */
 export const ALLOWED_OPS: Readonly<Record<ProposalType, readonly OpName[]>> = {
   merge: ['set_frontmatter', 'append_section', 'move_note', 'create_note'],
-  supersede: ['set_frontmatter', 'append_section'],
+  supersede: ['set_frontmatter', 'append_section', 'create_note'],
   summary: ['create_note', 'set_frontmatter'],
   archive: ['set_frontmatter', 'move_note'],
   demote: ['set_frontmatter'],
@@ -190,7 +194,7 @@ export function isLessonPath(rel: string): boolean {
 function createPathError(rel: string, type: ProposalType): string | undefined {
   const e = notePathError(rel);
   if (e !== undefined) return e;
-  if (type === 'lesson' && !isLessonPath(rel)) return 'a lesson is created under lessons/<principal-id>/';
+  if ((type === 'lesson' || type === 'supersede') && !isLessonPath(rel)) return `a ${type} proposal creates notes only under lessons/<principal-id>/`;
   if (FORBIDDEN_CREATE_ROOTS.includes(foldKey(rel.split('/')[0]!))) return `notes may not be created under ${rel.split('/')[0]}/`;
   return undefined;
 }

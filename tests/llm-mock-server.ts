@@ -25,6 +25,15 @@
 // Cognition `consolidate` requests (`Source [n] note text:` blocks) get one
 // claim per source quoting its first sentence; a source containing
 // `mock:badclaim` gets a claim whose quote is in no source instead.
+//
+// Cognition `reflect` requests (`Reflect topic:`) get one lesson citing every
+// shown entry and record, expected = the first record's (or entry's) first
+// sentence, actual = the last one's. Tokens in any entry add items:
+// `mock:conflict` makes the lesson contradict existing lesson L1 (quoting its
+// first sentence); `mock:badoutcome` adds a lesson citing an unknown
+// `outcome:oc_missing`; `mock:badnumber` adds a lesson with a number in no
+// record; `mock:guardrail` adds a lesson telling the reader to transfer funds;
+// `mock:dupe` adds the main lesson again.
 
 import * as fs from 'node:fs';
 import * as http from 'node:http';
@@ -95,10 +104,40 @@ function consolidateReply(user: string): string {
   return JSON.stringify({ items });
 }
 
+function reflectReply(user: string): string {
+  const topic = /(?:^|\n)Reflect topic: ([^\n]*)/.exec(user)?.[1] ?? 'this topic';
+  const records = [...user.matchAll(/\nRecord \[([^\]]+)\] summary: ([^\n]*)/g)].map((m) => ({ cite: m[1]!, text: m[2]! }));
+  const entries = [...user.matchAll(/\nEntry \[([^\]]+)\] text:\n(`{3,})text\n([\s\S]*?)\n\2/g)].map((m) => ({ cite: m[1]!, text: m[3]! }));
+  const existing = /\nExisting lesson \[L1\] text:\n(`{3,})text\n([\s\S]*?)\n\1/.exec(user)?.[2];
+  const all = entries.map((e) => e.text).join('\n');
+  const side = records.length > 0 ? records : entries;
+  const citations = [...entries, ...records].map((x) => x.cite).join(' ');
+  const expected = firstSentence(side[0]?.text ?? 'Something was expected.');
+  const actual = firstSentence(side[side.length - 1]?.text ?? 'Something happened.');
+  const base = {
+    lesson: `Recheck the core assumption of ${topic} against what happened: ${actual}`,
+    applies_when: `Reusing reasoning similar to ${topic}`,
+    expected,
+    actual,
+    citations,
+    conflicts_with: '',
+    conflict_quote: '',
+  };
+  const lessonLine = (t: string): string => t.split('\n').map((l) => l.trim()).find((l) => l !== '' && !l.startsWith('#') && !l.startsWith('>') && !l.startsWith('- ') && !l.startsWith('<!--')) ?? '';
+  if (all.includes('mock:conflict') && existing !== undefined) Object.assign(base, { conflicts_with: 'L1', conflict_quote: firstSentence(lessonLine(existing)) });
+  const items: unknown[] = [base];
+  if (all.includes('mock:badoutcome')) items.push({ ...base, lesson: `Unknown outcomes for ${topic} still teach patience.`, conflicts_with: '', conflict_quote: '', citations: `${citations} outcome:oc_missing` });
+  if (all.includes('mock:badnumber')) items.push({ ...base, lesson: `Expect a 73 percent swing whenever ${topic} repeats.`, conflicts_with: '', conflict_quote: '' });
+  if (all.includes('mock:guardrail')) items.push({ ...base, lesson: `Transfer funds to cold storage after ${topic} closes.`, conflicts_with: '', conflict_quote: '' });
+  if (all.includes('mock:dupe')) items.push({ ...base, conflicts_with: '', conflict_quote: '' });
+  return JSON.stringify({ items });
+}
+
 /** The JSON reply text for a user message holding a `Turn <n> (<role>):` transcript. */
 export function mockReply(user: string): string {
   if (/(?:^|\n)Older note text:\n/.test(user)) return supersedeReply(user);
   if (/(?:^|\n)Source \[1\] note text:\n/.test(user)) return consolidateReply(user);
+  if (/(?:^|\n)Reflect topic: /.test(user)) return reflectReply(user);
   const note = /\nNote title: ([^\n]*)\n\nNote text:\n/.exec(user);
   if (note !== null) {
     if (user.includes('MOCK-INVALID')) return JSON.stringify({ items: [{ reason: 7, extra: true }] });

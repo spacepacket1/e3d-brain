@@ -44,7 +44,7 @@ import {
 import { listOperations, recoverPending, restore, runOperation, sha256, UndoError, type PlannedOp, type UndoEnv, type UndoManifest } from '../undo/store.js';
 import { folderClass } from '../vault/names.js';
 import { canonicalJson, decodeNote, revOf, splitFrontmatter } from '../vault/parse.js';
-import { archiveDestination, immutableDigest, parseProposal, ProposalError, type ChangeOp, type ParsedProposal } from './proposal.js';
+import { archiveDestination, immutableDigest, isLessonPath, parseProposal, ProposalError, type ChangeOp, type ParsedProposal } from './proposal.js';
 
 export const APPLIED_DIR = `${INBOX_DIR}/_applied`;
 /** Scratch copies for `review edit` (state dir, never the vault). */
@@ -395,6 +395,14 @@ export function listQueue(env: ReviewQueueEnv): QueueItem[] {
   });
 }
 
+/** The standing banner `review show` prints on every lesson (cognition Phase 6). */
+export const LESSON_BANNER = '!!! LESSON: advisory, unverified. Model-proposed from recorded outcomes; it never authorizes spending, signing, or any action';
+
+/** True for a proposal that creates a lesson note (`lesson`, or a `reflect` supersede creating the replacing lesson). */
+function createsLesson(p: ParsedProposal): boolean {
+  return p.meta.proposal_type === 'lesson' || p.ops.some((o) => o.op === 'create_note' && isLessonPath(o.path));
+}
+
 /** The proposal with its authentication, freshness, taint banner, and the live diff. */
 export function showQueued(env: ReviewQueueEnv, id: string, opts: { diffOnly?: boolean } = {}): string {
   const l = openProposal(env, id);
@@ -406,6 +414,7 @@ export function showQueued(env: ReviewQueueEnv, id: string, opts: { diffOnly?: b
   if (p.meta.untrusted_origin) {
     out.push('!!! UNTRUSTED ORIGIN: derived from untrusted sources', `!!! taint sources: ${p.meta.taint_sources.join(', ') || '(none listed)'}`, '');
   }
+  if (createsLesson(p)) out.push(LESSON_BANNER, '');
   if (p.meta.needs_review === 'unadjudicated') out.push('!!! NEEDS REVIEW (unadjudicated): no model judged this proposal; read the cited notes before accepting', '');
   out.push(
     `id: ${p.meta.id}`,

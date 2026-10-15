@@ -67,6 +67,17 @@ export interface CognitionConfig {
   maxProposalsPerRun: number;
   supersede: SupersedeConfig;
   consolidate: ConsolidateConfig;
+  reflect: ReflectConfig;
+}
+
+/** The `reflect` job's limits (cognition Phase 6). */
+export interface ReflectConfig {
+  /** At most this many lessons per closed thesis (or decision) per run. */
+  maxLessons: number;
+  /** A proposed lesson whose 3-word-shingle Jaccard with an existing accepted lesson is at least this is a duplicate and dropped. */
+  minDuplicateJaccard: number;
+  /** The human-brain variant: also reflect on `decision` notes cited by a later outcome note. Off by default. */
+  decisions: boolean;
 }
 
 /** The `consolidate` job's thresholds (cognition Phase 5). */
@@ -185,6 +196,9 @@ export const DEFAULT_MAX_PROPOSALS_PER_RUN = 20;
 export const DEFAULT_SUPERSEDE_MIN_JACCARD = 0.5;
 export const DEFAULT_SUPERSEDE_MAX_UNADJUDICATED = 5;
 export const DEFAULT_CONSOLIDATE: Readonly<ConsolidateConfig> = { minJaccard: 0.5, minCosine: 0.95, maxSummaries: 5 };
+export const DEFAULT_REFLECT: Readonly<ReflectConfig> = { maxLessons: 3, minDuplicateJaccard: 0.5, decisions: false };
+/** Upper bound for `cognition.reflect.maxLessons`. */
+export const MAX_REFLECT_LESSONS = 10;
 /** Upper bound for `inbox.maxPendingProposals`, `cognition.maxProposalsPerRun`, and `--max-proposals`. */
 export const MAX_PROPOSALS_CEILING = 10_000;
 /** `evidence.dir` default: `<stateDir>/evidence`. */
@@ -432,7 +446,7 @@ export function parseConfig(raw: unknown, opts: { homeDir?: string } = {}): Conf
     return v;
   };
   const inboxRaw = section(raw, 'inbox', ['maxPendingProposals'], false);
-  const cognitionRaw = section(raw, 'cognition', ['maxProposalsPerRun', 'supersede', 'consolidate'], false);
+  const cognitionRaw = section(raw, 'cognition', ['maxProposalsPerRun', 'supersede', 'consolidate', 'reflect'], false);
   const supersedeRaw: Json = cognitionRaw.supersede === undefined ? {} : (cognitionRaw.supersede as Json);
   if (!isObject(supersedeRaw)) throw new ConfigError('config key "cognition.supersede" must be an object');
   checkKeys(supersedeRaw, ['minJaccard', 'maxUnadjudicated'], 'cognition.supersede.');
@@ -450,6 +464,19 @@ export function parseConfig(raw: unknown, opts: { homeDir?: string } = {}): Conf
     }
     return v;
   };
+  const reflectRaw: Json = cognitionRaw.reflect === undefined ? {} : (cognitionRaw.reflect as Json);
+  if (!isObject(reflectRaw)) throw new ConfigError('config key "cognition.reflect" must be an object');
+  checkKeys(reflectRaw, ['maxLessons', 'minDuplicateJaccard', 'decisions'], 'cognition.reflect.');
+  const maxLessons = reflectRaw.maxLessons === undefined ? DEFAULT_REFLECT.maxLessons : reflectRaw.maxLessons;
+  if (typeof maxLessons !== 'number' || !Number.isInteger(maxLessons) || maxLessons < 1 || maxLessons > MAX_REFLECT_LESSONS) {
+    throw new ConfigError(`config key "cognition.reflect.maxLessons" must be an integer from 1 to ${MAX_REFLECT_LESSONS}`);
+  }
+  const minDup = reflectRaw.minDuplicateJaccard === undefined ? DEFAULT_REFLECT.minDuplicateJaccard : reflectRaw.minDuplicateJaccard;
+  if (typeof minDup !== 'number' || !Number.isFinite(minDup) || minDup <= 0 || minDup > 1) {
+    throw new ConfigError('config key "cognition.reflect.minDuplicateJaccard" must be a number greater than 0 and at most 1');
+  }
+  const decisions = reflectRaw.decisions === undefined ? DEFAULT_REFLECT.decisions : reflectRaw.decisions;
+  if (typeof decisions !== 'boolean') throw new ConfigError('config key "cognition.reflect.decisions" must be true or false');
 
   return {
     vaultPath,
@@ -478,6 +505,7 @@ export function parseConfig(raw: unknown, opts: { homeDir?: string } = {}): Conf
         minCosine: fraction('minCosine'),
         maxSummaries: countKey(consolidateRaw, 'cognition.consolidate.maxSummaries', 'maxSummaries', DEFAULT_CONSOLIDATE.maxSummaries),
       },
+      reflect: { maxLessons, minDuplicateJaccard: minDup, decisions },
     },
     evidence: parseEvidence(section(raw, 'evidence', ['dir', 'sources', 'maxFileMB', 'maxRecordBytes'], false), vaultPath, stateDir, home),
   };

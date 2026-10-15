@@ -9,6 +9,7 @@ import { findJob, JOBS } from '../cognition/jobs/index.js';
 import { CognitionError, runJob } from '../cognition/run.js';
 import { listRunRecords, type RunRecord } from '../cognition/runs.js';
 import { PromptFileError } from '../cognition/prompts.js';
+import { discoverEvidence, EvidenceError, openEvidence, type OpenEvidence } from '../evidence/store.js';
 import { closeIndex, openIndex } from '../index/indexer.js';
 import { createProvider, DATA_LEAVES_MACHINE_FLAG, LlmRefusedError, type ExtractionProvider } from '../llm/provider.js';
 import { SafePathError } from '../safe-path.js';
@@ -72,6 +73,15 @@ function summarize(r: RunRecord, created: { id: string; path: string }[], maxPen
       lines.push('no LLM provider: summaries are extractive link lists');
     }
   }
+  if (r.job === 'reflect') {
+    lines.push(
+      `reflect: ${c('groups')} closed theses/decisions with entries and outcomes (skipped ${c('skipped_thesis_unresolved')} unresolved theses, ${c('skipped_open_thesis')} open, ${c('skipped_no_outcome')} without an outcome); ${c('existing_lessons')} existing lessons`,
+      `lessons: ${c('lessons_proposed')} proposed by the model, ${c('lessons_kept')} kept; dropped ${c('lessons_unresolved_citation')} with unresolved citations, ${c('lessons_foreign_citation')} citing outside their thesis, ` +
+        `${c('lessons_missing_citation')} missing an entry/thesis/outcome citation, ${c('lessons_unsupported_number')} with unsupported numbers, ${c('lessons_guardrail_dropped')} by the guardrails, ` +
+        `${c('lessons_scrub_rejected')} by the strict scrubber, ${c('lessons_duplicate')} duplicates, ${c('conflict_quote_unverified')} with an unverified conflict quote`,
+      'lessons are advisory and unverified; review each with: ebrain review show <id>',
+    );
+  }
   if (c('skipped_provisional') > 0) lines.push(`${c('skipped_provisional')} notes have only a provisional id and were skipped; run: ebrain ids assign`);
   lines.push(`review with: ebrain review list`);
   return `${lines.join('\n')}\n`;
@@ -133,19 +143,24 @@ async function runCommand(args: readonly string[], opts: CognitionCommandOptions
   } catch (err) {
     return fail(message(err));
   }
+  let evidence: OpenEvidence | undefined;
   try {
+    // Jobs that need ground truth get it only when an evidence file is configured and readable; runJob refuses otherwise.
+    if (job.evidence === 'required' && discoverEvidence(config).some((f) => f.refused === undefined)) evidence = openEvidence({ config, stateDir });
     const r = await runJob({
       config, stateDir, index: h, job, dryRun, reconsider,
       ...(provider === undefined ? {} : { provider }),
+      ...(evidence === undefined ? {} : { evidence }),
       ...(since === undefined ? {} : { since, sinceMs: Date.parse(since) }),
       ...(maxProposals === undefined ? {} : { maxProposals }),
       ...(opts.now === undefined ? {} : { now: opts.now }),
     });
     return { code: 0, stdout: summarize(r.record, r.created, config.inbox.maxPendingProposals), stderr: '' };
   } catch (err) {
-    const known = err instanceof CognitionError || err instanceof SafePathError || err instanceof PromptFileError;
+    const known = err instanceof CognitionError || err instanceof SafePathError || err instanceof PromptFileError || err instanceof EvidenceError;
     return fail(known ? message(err) : `failed: ${message(err)}`);
   } finally {
+    evidence?.close();
     closeIndex(h);
   }
 }

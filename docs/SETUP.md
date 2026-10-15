@@ -211,6 +211,9 @@ Optional keys may be omitted to take their defaults.
 | `cognition.consolidate.minJaccard` | no | `0.5` | number above 0, at most 1; `consolidate` treats two notes as near-duplicates when their 3-word-shingle Jaccard similarity is at least this |
 | `cognition.consolidate.minCosine` | no | `0.95` | number above 0, at most 1; with embeddings on, notes whose mean stored chunk vectors have at least this cosine similarity are also near-duplicates |
 | `cognition.consolidate.maxSummaries` | no | `5` | integer 1-10000; at most this many `summary` proposals per `consolidate` run |
+| `cognition.reflect.maxLessons` | no | `3` | integer 1-10; `reflect` asks the model for at most this many lessons per closed thesis (or decision) |
+| `cognition.reflect.minDuplicateJaccard` | no | `0.5` | number above 0, at most 1; a proposed lesson whose 3-word-shingle Jaccard with an existing accepted lesson (or another lesson of the run) is at least this is dropped as a duplicate |
+| `cognition.reflect.decisions` | no | `false` | `true` or `false`; also reflect on curated `decision` notes cited (in `sources`) by a later note tagged `#outcome` or with an `outcome:` key (the human-brain variant) |
 | `cognition.maxProposalsPerRun` | no | `20` | integer 1-10000; most proposals one cognition run creates (`--max-proposals` overrides); LLM caps are `llm.maxCallsPerRun` and `llm.maxInputCharsPerRun` |
 | `evidence.dir` | no | `<stateDir>/evidence` | absolute or `~/`; not inside the vault (or containing it) and not the state directory itself; `evidence import` writes here and every `*.jsonl` in it is loaded |
 | `evidence.sources` | no | `[]` | up to 64 `.jsonl` files (absolute or `~/`, no `.`/`..` segments), outside the vault and the state directory; read-only, loaded before `evidence.dir` |
@@ -413,7 +416,9 @@ Built-in jobs: `selftest` proposes demoting (`status: stale`) every curated
 note tagged `#ebrain-selftest`, so you can try the whole flow; `supersede`
 proposes marking older notes superseded by newer ones (see "The supersede
 job" below); `consolidate` proposes merging near-duplicate notes and
-summarizing clusters of related notes (see "The consolidate job" below).
+summarizing clusters of related notes (see "The consolidate job" below);
+`reflect` proposes advisory lessons from closed theses and their recorded
+outcomes (see "The reflect job" below).
 Jobs only use notes with an assigned `id`; notes with only a provisional id
 are skipped and counted, and the run tells you to run `ebrain ids assign`.
 
@@ -569,6 +574,61 @@ Proposals are ordered merges first (highest overlap, then path), then
 summaries (largest cluster, then path). With `--since`, only pairs and
 clusters with a note dated on or after it are considered. Re-runs create
 nothing new; rejected proposals are not re-proposed unless `--reconsider`.
+
+### The reflect job
+
+`ebrain cognition run reflect` asks "what did outcomes teach us?". It needs
+ground truth and a model: with no readable evidence file (see "Evidence
+files" below) it exits with a message and creates nothing, and without an
+LLM provider it refuses too.
+
+**Pairing is structural.** Your journal entries (`journal/<your principal
+id>/`) and curated notes whose `sources` cite `thesis:<id>` are grouped by
+thesis. A thesis is reflected on when its record is in local evidence, it is
+closed (an `attributes.status`, if present, is `closed`), and at least one
+`outcome` record has `attributes.thesis` equal to its id. Nothing is paired
+by how close two timestamps are. At most 8 entries per thesis are shown to
+the model (newest first). Groups are processed newest outcome first; with
+`--since`, theses whose latest outcome is earlier are skipped.
+
+**Checks.** The model proposes at most `cognition.reflect.maxLessons`
+lessons per thesis, each limited to the lesson text, `applies_when`, and an
+expected-vs-actual comparison, with citations. A lesson is dropped and
+counted when a citation does not resolve (notes at their cited revision,
+`thesis:`/`outcome:` in local evidence) or lies outside its thesis, when it
+lacks an entry, the thesis, or an outcome citation, when it holds a number
+that is not in the records it cites, when strict scrubbing finds anything,
+when it repeats an existing lesson, or when it trips a guardrail: a URL, a
+wallet-style `0x` address, a code fence, or one of the deny-listed action
+verbs (transfer, sign, approve, send, withdraw, execute, authorize, spend,
+in every form). Lessons are advice for future reasoning, never an
+instruction to act; `ebrain review show` prints an "advisory, unverified"
+banner on every lesson.
+
+**Contradictions.** Existing accepted lessons that share a tag with the
+thesis entries, or whose `derived_from` cites the same thesis, are shown to
+the model. A new lesson that contradicts one (quoting the contradicted
+sentence word for word) becomes a `supersede` proposal: accepting it creates
+the new lesson and marks the old one `superseded` (with `superseded_by`,
+`superseded_at`, `valid_until`); it is never filed as a second lesson.
+
+**Accept.** The other lessons of a thesis form one `lesson` proposal. On
+accept each lesson is created at `lessons/<your principal
+id>/<slug>-<hash>.md` with `kind: lesson`, `status: accepted`,
+`applies_when`, and `derived_from` (its citations, for example
+`note:<id>@<rev>`, `thesis:th_123`, `outcome:oc_456`). As a curated note it
+ranks at tier T1, above every journal lesson. `ebrain review undo` removes
+exactly the files accept created. Lessons derived from any
+`untrusted_origin` entry are marked untrusted, and so is the proposal.
+
+**Decisions (optional).** With `cognition.reflect.decisions: true`, a
+curated `kind: decision` note and later notes whose `sources` cite it and
+that record an outcome (tag `#outcome` or an `outcome:` frontmatter key)
+are reflected on the same way, with the same citation rules. It still
+requires a configured evidence source.
+
+Re-runs create nothing new and make no model calls for theses already
+proposed; rejected proposals are not re-proposed unless `--reconsider`.
 
 ## Evidence files (thesis and outcome records)
 

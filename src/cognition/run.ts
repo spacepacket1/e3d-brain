@@ -22,6 +22,7 @@
 import { createHash } from 'node:crypto';
 import { parseCitation } from '../cite/citation.js';
 import type { Config } from '../config.js';
+import type { EvidenceSource } from '../evidence/source.js';
 import { cleanTitle, isoSeconds, toSlug } from '../inbox/note.js';
 import { writeInboxFile } from '../inbox/writer.js';
 import { refreshIndex, type IndexHandle } from '../index/indexer.js';
@@ -68,6 +69,8 @@ export interface JobContext {
   sinceMs?: number;
   /** Present when the job may use a model and a provider is configured. */
   llm?: LlmSession;
+  /** Local evidence (Phase 3), when the caller opened it (always present for jobs with `evidence: 'required'`). */
+  evidence?: EvidenceSource;
   /** Scrub text under the principal's rules; undefined when strict rules reject it. */
   scrubText(text: string): string | undefined;
   /** Record an input note (id and rev only). */
@@ -98,6 +101,8 @@ export interface CognitionJob {
   description: string;
   /** Whether the job can use a model: `never`, `optional` (works without one), or `required`. */
   llm: 'never' | 'optional' | 'required';
+  /** `required`: the run refuses to start (creating nothing) without a configured evidence source. */
+  evidence?: 'required';
   generate(ctx: JobContext): Promise<JobOutput>;
 }
 
@@ -107,6 +112,8 @@ export interface RunOptions {
   index: IndexHandle;
   job: CognitionJob;
   provider?: ExtractionProvider;
+  /** Local evidence; undefined when no evidence file is configured and readable. */
+  evidence?: EvidenceSource;
   sinceMs?: number;
   since?: string;
   maxProposals?: number;
@@ -172,6 +179,12 @@ export async function runJob(opts: RunOptions): Promise<RunResult> {
   }
   try {
     let llm: LlmSession | undefined;
+    if (job.evidence === 'required' && opts.evidence === undefined) {
+      throw new CognitionError(
+        `job ${job.name} needs an evidence source and none is configured (no readable *.jsonl file in evidence.dir or evidence.sources); ` +
+          'it does not run without ground truth. Import outcomes with: ebrain evidence import <file>',
+      );
+    }
     if (job.llm === 'required' && opts.provider === undefined) throw new CognitionError(`job ${job.name} needs an LLM provider (llm.provider is "none")`);
     if (job.llm !== 'never' && opts.provider !== undefined) {
       llm = new LlmSession(opts.provider, loadPrompt(job.name), {
@@ -247,6 +260,7 @@ export async function runJob(opts: RunOptions): Promise<RunResult> {
         count,
         ...(opts.sinceMs === undefined ? {} : { sinceMs: opts.sinceMs }),
         ...(llm === undefined ? {} : { llm }),
+        ...(opts.evidence === undefined ? {} : { evidence: opts.evidence }),
       };
       const out = await job.generate(ctx);
       count('drafts', out.drafts.length);
