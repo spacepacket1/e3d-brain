@@ -205,6 +205,8 @@ Optional keys may be omitted to take their defaults.
 | `llm.maxOutputTokens` | no | `2048` | integer 64-64000; completion size requested per call |
 | `llm.timeoutMs` | no | `120000` | integer 1000-600000; per-call timeout |
 | `recallLog.retentionDays` | no | `180` | integer 1-36500; `ebrain recalls prune` drops recall records older than this |
+| `inbox.maxPendingProposals` | no | `50` | integer 1-10000; a cognition run stops creating proposals once this many typed proposals are open (`status: proposed`) in `_inbox/` |
+| `cognition.maxProposalsPerRun` | no | `20` | integer 1-10000; most proposals one cognition run creates (`--max-proposals` overrides); LLM caps are `llm.maxCallsPerRun` and `llm.maxInputCharsPerRun` |
 
 Later phases add keys here in the same change that adds them to the schema.
 
@@ -293,7 +295,7 @@ next `ebrain reindex --full` (best effort; cite assigned ids). `pinned: true`
 is kept as written; nothing here acts on it.
 
 Every owner command that rewrites, creates, or moves vault files (today
-`ids assign`; the review queue later) is one **undo operation**: before
+`ids assign` and `review accept`) is one **undo operation**: before
 writing, the originals are saved under `<stateDir>/undo/<operation-id>/`
 (`0600`, same relative paths) with a manifest of each file's raw SHA-256
 before and after. `ebrain undo <operation-id>` restores every file byte for
@@ -377,6 +379,105 @@ Nothing a model proposes becomes curated memory until you accept it.
 - `_inbox/` exists in every vault (`ebrain init` creates it; the inbox
   commands recreate it if missing). Owner-run CLI jobs may write proposals
   there in any mode; only the MCP tools are limited to `inbox` mode.
+
+## Cognition jobs and the review queue
+
+Cognition jobs read the brain and write **typed proposals** to `_inbox/`;
+nothing they produce changes curated memory until you accept it here. Jobs
+start only from the owner CLI (no MCP tool starts, schedules, reviews,
+accepts, or applies anything) and work in every instance mode.
+
+```bash
+ebrain cognition run <job> [--since <date>] [--max-proposals N] [--dry-run] [--reconsider]
+ebrain cognition runs                  # run records, newest first
+ebrain review list                     # open typed proposals: status, type, job, authentication, taint
+ebrain review show <id>                # the proposal plus the exact change against current notes
+ebrain review diff <id>                # only the change
+ebrain review accept <id>              # apply it (revision-checked, atomic, undoable)
+ebrain review edit <id>                # edit prose or new-note content in $VISUAL/$EDITOR
+ebrain review reject <id> [--reason "why"]
+ebrain review undo <id>                # restore what accept changed
+ebrain review recover                  # finish or roll back an interrupted accept
+```
+
+The built-in job today is `selftest`: it proposes demoting (`status: stale`)
+every curated note tagged `#ebrain-selftest`, so you can try the whole flow.
+Jobs only use notes with an assigned `id`; notes with only a provisional id
+are skipped and counted, and the run tells you to run `ebrain ids assign`.
+
+**Runs.** One run of a job at a time (lock `<stateDir>/locks/cognition-<job>.lock`;
+a second run refuses to start). Each run writes
+`<stateDir>/runs/<run-id>.json` (`0600`): job and version, prompt id and hash,
+provider and model, budget settings, input note ids and revs (and a hash of
+the list), counts by outcome, the stop reason, and every proposal's id, key,
+and immutable-field digest. Records never hold note text, queries, prompts,
+model output, or secrets; each LLM request is logged as SHA-256 hashes of its
+input and output. A run stops cleanly (exit 0, a partial and well-formed
+result, the reason recorded) at `--max-proposals` /
+`cognition.maxProposalsPerRun`, at `inbox.maxPendingProposals` open
+proposals, or when the LLM budget (`llm.maxCallsPerRun`,
+`llm.maxInputCharsPerRun`) runs out. Proposals are created in each job's
+documented deterministic priority order, never by model score. Model output
+must match a strict schema; invalid items are dropped and counted. Prompts
+are versioned files `src/cognition/prompts/<job>.v<N>.md`, never edited in
+place. `--dry-run` writes nothing to the vault (the run record notes it).
+
+**Proposals.** A proposal is a note in `_inbox/` with `kind: proposal`,
+`status: proposed`, `proposal_type` (`merge`, `supersede`, `summary`,
+`archive`, `demote`, `lesson`, `gap`), `job`, `job_version`, `created`,
+`author: ebrain-<job>`, `origin: cli`, `targets` (`{id, rev,
+path_at_proposal}`), `evidence` (citations), `untrusted_origin`,
+`taint_sources`, `confidence: unrated`, and `proposal_key` (a hash of the
+job, the type, and the sorted evidence: the same finding always gets the same
+key). Everything a job writes is scrubbed. A proposal touching or citing an
+`untrusted_origin` note carries `untrusted_origin: true` and lists those
+sources; `review show` and `review list` flag it. The body holds the
+rationale, one fenced `ebrain-change` block, and a preview. The change block
+is JSON, `{"version": 1, "ops": [...]}`, in a closed grammar:
+
+| Op | Fields | Notes |
+|---|---|---|
+| `set_frontmatter` | `target`, `key`, `value` | `key` is one of `status` (`accepted`, `superseded`, `archived`, `stale`), `superseded_by`, `merged_into` (assigned ids), `supersedes` (list of ids), `superseded_at`, `valid_until`, `archived_at` (ISO dates); only that key's lines change |
+| `create_note` | `path`, `content` | a new `.md` path (never `_inbox/`, `journal/`, `_raw/`, `_archive/`, or a dot-directory; a `lesson` only under `lessons/<principal-id>/`); refused if the file exists |
+| `move_note` | `target`, `to` | only the archive path (`_archive/<path>`, or `journal/_archive/<principal-id>/...` for journal entries) or `lessons/<principal-id>/<name>.md`; a taken name gets `-2`, `-3`, ... |
+| `append_section` | `target`, `text` | Markdown appended to the end of the note |
+
+Every `target` must be listed in `targets`. Types allow: `demote`
+set_frontmatter; `supersede` set_frontmatter, append_section; `archive`
+set_frontmatter, move_note; `merge` all four; `summary` create_note,
+set_frontmatter; `lesson` create_note, set_frontmatter, move_note,
+append_section; `gap` nothing (a report). Anything else (unknown ops or
+fields, an op its type does not allow, an unsafe path) makes the proposal
+invalid. Paths are resolved through the same safe-path rules as everything
+else. No op deletes a note.
+
+**Accept** applies a proposal only if (1) a run record lists its id with the
+same immutable-field digest (frontmatter such as `origin: cli` or
+`author: ebrain-*` is never trusted on its own; `capture` and
+`journal_append` cannot set those fields anyway), (2) every target still has
+the pinned `rev` and every cited note revision is current (otherwise the
+proposal is marked `stale` and refused: edit happened between preview and
+accept; reject it and re-run the job), and (3) its status is `proposed`.
+The change is then one undo operation (see "Assigning ids and undo"): the
+originals are saved, each file's raw SHA-256 is re-checked immediately before
+it is written, and only after the operation commits is the proposal marked
+`status: accepted`, `applied: <timestamp>`, and moved to `_inbox/_applied/`.
+A crash in between is finished by the next `accept` or `ebrain review
+recover`. Line endings and a BOM are kept. **Undo** (`ebrain review undo <id>`)
+restores the originals byte for byte and moves the proposal back to
+`_inbox/` (`status: proposed`, `undone: <timestamp>`); it refuses, changing
+nothing, if any affected file was edited since.
+
+**Edit** opens a copy in your editor; the result must still be a valid
+proposal with `status: proposed`. `targets`, `evidence`, `proposal_key`,
+`proposal_type`, `job`, `id`, and every op except `create_note` content and
+`append_section` text are immutable: an edit that changes them is refused
+(reject and re-run instead). **Reject** moves the proposal to
+`_inbox/_rejected/` and records its `proposal_key` in
+`<stateDir>/rejections.json` (key, time, job, type, id; no reason text). Later
+runs skip a rejected key unless you pass `--reconsider`. `ebrain inbox
+accept/reject` keep working for ordinary notes; `review` only handles
+`kind: proposal` notes from recorded runs.
 
 ## Scrubbing
 

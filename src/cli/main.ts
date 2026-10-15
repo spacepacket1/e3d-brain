@@ -2,6 +2,7 @@
 // `ebrain` CLI entry point.
 
 import { runAudit } from './audit-commands.js';
+import { runCognition } from './cognition-commands.js';
 import { runDoctor } from './doctor.js';
 import { runInbox } from './inbox-commands.js';
 import { runIndexCommand, runReindex, type CommandResult } from './index-commands.js';
@@ -11,6 +12,7 @@ import { runHook } from './hook-commands.js';
 import { runImport, runJournal } from './journal-commands.js';
 import { runPropose } from './propose-command.js';
 import { runRefs } from './refs-commands.js';
+import { runReview } from './review-commands.js';
 import { runScrub } from './scrub-command.js';
 import { ConfigError, loadConfig } from '../config.js';
 import { runMcpServer } from '../mcp/server.js';
@@ -77,6 +79,21 @@ commands:
   undo <operation-id>
                     restore the files an owner command rewrote, created, or moved (refuses if any was edited since)
   undo --list       list undo operations (machine-local, under <stateDir>/undo/)
+  cognition run <job> [--since <date>] [--max-proposals <n>] [--dry-run] [--reconsider] [--i-understand-data-leaves-machine]
+                    run a cognition job (built in: selftest); writes typed proposals to _inbox/ and a run
+                    record to <stateDir>/runs/ (one run per job at a time; never applies anything)
+  cognition runs [-n <count>]
+                    list run records
+  review list       list typed proposals waiting in _inbox/ (with authentication and taint)
+  review show <id> | review diff <id>
+                    print a proposal and the exact change against current note contents
+  review accept <id>
+                    apply a proposal's change block (revision-checked, atomic, undoable); refuses stale ones
+  review edit <id>  edit prose or new-note content in $EDITOR (immutable fields are checked)
+  review reject <id> [--reason <text>]
+                    move to _inbox/_rejected/ and remember it so re-runs do not propose it again
+  review undo <id>  restore what accept changed (refuses if any file was edited since)
+  review recover    roll back an interrupted apply and finish interrupted accepts
   recalls prune [--older-than <days>]
                     drop recall records older than recallLog.retentionDays (default 180) from <stateDir>/recalls.jsonl
   scrub <file|-> [--strict] [--entropy-threshold <bits>]
@@ -193,6 +210,10 @@ export function main(argv: readonly string[]): number | Promise<number> {
       return emit(runToken(rest));
     case 'ids':
       return emit(runIds(rest));
+    case 'cognition':
+      return runCognition(rest).then(emit);
+    case 'review':
+      return emit(runReview(rest));
     case 'undo':
       return emit(runUndo(rest));
     case 'recalls':

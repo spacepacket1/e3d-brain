@@ -4,7 +4,8 @@
 //
 //   manifest.json   {operation_id, created, command, status, ops}
 //   done.jsonl      one line per op index once that op is published
-//   files/<path>    the original bytes of every `rewrite` op, at its vault-relative path
+//   files/<path>    the original bytes of every `rewrite` op (and of every `move`
+//                   that also changes content, at its source path), at its vault-relative path
 //
 // Everything is mode 0600/0700 in the private state directory, never in the
 // vault (so undo data never reaches git or sync, and undo is machine-local).
@@ -57,7 +58,8 @@ export type UndoStatus = 'pending' | 'committed' | 'rolled_back';
 export type UndoOp =
   | { type: 'rewrite'; path: string; sha256_before: string; sha256_after: string; mode: number }
   | { type: 'create'; path: string; sha256_after: string }
-  | { type: 'move'; path: string; from: string; sha256_before: string; sha256_after: string };
+  /** A move whose `sha256_after` differs from `sha256_before` also rewrote the content (`mode` is then set). */
+  | { type: 'move'; path: string; from: string; sha256_before: string; sha256_after: string; mode?: number };
 
 export interface UndoManifest {
   operation_id: string;
@@ -72,7 +74,8 @@ export interface UndoManifest {
 export type PlannedOp =
   | { type: 'rewrite'; path: string; data: Uint8Array; /** Refuse unless the current bytes hash to this. */ expectSha256?: string }
   | { type: 'create'; path: string; data: Uint8Array }
-  | { type: 'move'; from: string; path: string; expectSha256?: string };
+  /** `data`, when given, replaces the content as part of the move (archive = set frontmatter + move). */
+  | { type: 'move'; from: string; path: string; expectSha256?: string; data?: Uint8Array };
 
 export interface UndoEnv {
   vaultPath: string;
@@ -175,9 +178,17 @@ function parseOp(env: UndoEnv, raw: unknown): UndoOp {
     }
     case 'create':
       return { type: 'create', path: path as string, sha256_after: hash('sha256_after') };
-    case 'move':
+    case 'move': {
       vaultFile(env, raw['from']);
-      return { type: 'move', path: path as string, from: raw['from'] as string, sha256_before: hash('sha256_before'), sha256_after: hash('sha256_after') };
+      const op: UndoOp = { type: 'move', path: path as string, from: raw['from'] as string, sha256_before: hash('sha256_before'), sha256_after: hash('sha256_after') };
+      const mode = raw['mode'];
+      if (mode !== undefined) {
+        if (typeof mode !== 'number' || !Number.isInteger(mode) || mode < 0 || mode > 0o777) fail('invalid', 'manifest op mode is invalid');
+        op.mode = mode;
+      }
+      if (op.sha256_after !== op.sha256_before && op.mode === undefined) fail('invalid', 'manifest move op changes content without a mode');
+      return op;
+    }
     default:
       fail('invalid', 'manifest op has an unknown type');
   }
@@ -235,10 +246,13 @@ function forward(env: UndoEnv, op: UndoOp): void {
     if (current === undefined || sha256(current) !== op.sha256_before) fail('conflict', `${op.from} changed before it could be moved`);
     ensureParent(env, op.path);
     renameSafe(source, target);
+    // A content-changing move publishes the new bytes at the destination; until then the
+    // destination holds the original bytes, which `rollBack` also recognizes and moves back.
+    if (op.sha256_after !== op.sha256_before) writeAtomic(target, pendingData.get(op)!, { mode: op.mode! });
   }
 }
 
-/** Undo one published op. */
+/** Undo one published (or half-published) op. */
 function reverse(env: UndoEnv, id: string, op: UndoOp): void {
   const target = vaultFile(env, op.path);
   if (op.type === 'rewrite') {
@@ -249,6 +263,9 @@ function reverse(env: UndoEnv, id: string, op: UndoOp): void {
     const source = vaultFile(env, op.from);
     ensureParent(env, op.from);
     renameSafe(target, source);
+    if (op.sha256_after !== op.sha256_before && sha256(readFileSafe(source)) !== op.sha256_before) {
+      writeAtomic(source, readFileSafe(savedOriginal(env, id, op.from)), { mode: op.mode! });
+    }
   }
 }
 
@@ -257,7 +274,10 @@ function reapply(env: UndoEnv, op: UndoOp, after: Map<UndoOp, Buffer>): void {
   const target = vaultFile(env, op.path);
   if (op.type === 'rewrite') writeAtomic(target, after.get(op)!, { mode: op.mode });
   else if (op.type === 'create') createExclusive(target, after.get(op)!);
-  else renameSafe(vaultFile(env, op.from), target);
+  else {
+    renameSafe(vaultFile(env, op.from), target);
+    if (op.sha256_after !== op.sha256_before) writeAtomic(target, after.get(op)!, { mode: op.mode! });
+  }
 }
 
 // ---- public API ----
@@ -306,7 +326,14 @@ export function runOperation(env: UndoEnv, command: string, planned: readonly Pl
         const before = sha256(current);
         if (p.expectSha256 !== undefined && p.expectSha256 !== before) fail('conflict', `${p.from} changed since it was read`);
         if (statSafe(target) !== undefined) fail('conflict', `${p.path} already exists`);
-        ops.push({ type: 'move', path: p.path, from: p.from, sha256_before: before, sha256_after: before });
+        if (p.data === undefined || sha256(p.data) === before) {
+          ops.push({ type: 'move', path: p.path, from: p.from, sha256_before: before, sha256_after: before });
+        } else {
+          const op: UndoOp = { type: 'move', path: p.path, from: p.from, sha256_before: before, sha256_after: sha256(p.data), mode: statSafe(vaultFile(env, p.from))!.mode & 0o777 };
+          pendingData.set(op, p.data);
+          ops.push(op);
+          originals.push({ rel: p.from, data: current });
+        }
       }
     }
     mkdirSafe(opDir(env, id));
@@ -336,11 +363,18 @@ export function runOperation(env: UndoEnv, command: string, planned: readonly Pl
   });
 }
 
-/** Whether op's target now holds its `sha256_after` (it was published). */
+/**
+ * Whether op's target now holds its `sha256_after` (it was published). A
+ * content-changing move that was renamed but not yet rewritten (destination
+ * still holds the original bytes) counts too, so rollback moves it back.
+ */
 function published(env: UndoEnv, op: UndoOp): boolean {
   try {
     const current = readCurrent(vaultFile(env, op.path));
-    return current !== undefined && sha256(current) === op.sha256_after && (op.type !== 'move' || statSafe(vaultFile(env, op.from)) === undefined);
+    if (current === undefined) return false;
+    const h = sha256(current);
+    if (op.type === 'move') return (h === op.sha256_after || h === op.sha256_before) && statSafe(vaultFile(env, op.from)) === undefined;
+    return h === op.sha256_after;
   } catch {
     return false;
   }
@@ -409,9 +443,10 @@ export function restore(env: UndoEnv, operationId: string): UndoManifest {
       if (op.type === 'move' && statSafe(vaultFile(env, op.from)) !== undefined) {
         fail('conflict', `${op.from} exists again; refusing to undo operation ${operationId}`);
       }
-      if (op.type === 'rewrite') {
-        const saved = readFileSafe(savedOriginal(env, operationId, op.path));
-        if (sha256(saved) !== op.sha256_before) fail('invalid', `saved original of ${op.path} is damaged`);
+      if (op.type === 'rewrite' || (op.type === 'move' && op.sha256_after !== op.sha256_before)) {
+        const rel = op.type === 'move' ? op.from : op.path;
+        const saved = readFileSafe(savedOriginal(env, operationId, rel));
+        if (sha256(saved) !== op.sha256_before) fail('invalid', `saved original of ${rel} is damaged`);
       }
       after.set(op, current);
     }

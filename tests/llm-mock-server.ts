@@ -10,6 +10,10 @@
 // prints its port on the first line, appends every raw request body to the
 // log, and serves until killed. Mode `garbage` (env LLM_MOCK_MODE) replies
 // with non-JSON text.
+//
+// Cognition `selftest` requests (a `Note text:` block) get `{"items": [...]}`:
+// one valid item plus one schema-invalid item, or only an invalid item when
+// the note text contains MOCK-INVALID.
 
 import * as fs from 'node:fs';
 import * as http from 'node:http';
@@ -39,6 +43,11 @@ const KINDS: [RegExp, string][] = [
 
 /** The JSON reply text for a user message holding a `Turn <n> (<role>):` transcript. */
 export function mockReply(user: string): string {
+  const note = /\nNote title: ([^\n]*)\n\nNote text:\n/.exec(user);
+  if (note !== null) {
+    if (user.includes('MOCK-INVALID')) return JSON.stringify({ items: [{ reason: 7, extra: true }] });
+    return JSON.stringify({ items: [{ reason: `A note titled ${note[1]!.slice(0, 80)}.` }, { reason: 42 }] });
+  }
   const candidates: unknown[] = [];
   let turn = 0;
   let firstTurn = 0;

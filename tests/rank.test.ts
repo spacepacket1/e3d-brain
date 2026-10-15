@@ -207,6 +207,12 @@ const ORDER_ALLOWED: Record<string, string> = {
   'src/propose/archive-reader.ts': 'archive notes in path order (deterministic provider request order)',
   'src/undo/store.ts': 'undo operations newest first (ULID order); ops reversed in reverse order',
   'src/ids/assign.ts': 'notes lacking an id in listing order (deterministic assignment order)',
+  'src/review/proposal.ts': 'proposal keys hash the sorted evidence list (C5)',
+  'src/review/queue.ts': 'review list in file-name order',
+  'src/cognition/run.ts': 'run-record inputs and taint sources in id order',
+  'src/cognition/runs.ts': 'run records newest first (ULID order)',
+  'src/cognition/prompts.ts': 'prompt versions in numeric order',
+  'src/cognition/jobs/selftest.ts': 'selftest priority: vault path order (documented job rule)',
 };
 const ORDER_PATTERNS = [/\.sort\s*\(/, /\.toSorted\s*\(/, /\.reverse\s*\(/, /\.toReversed\s*\(/, /\bORDER\s+BY\b/i];
 const RELEVANCE_ORDER = /\bORDER\s+BY\b[^;`'"]*\b(?:bm25|rank|score|relevance)\b/i;

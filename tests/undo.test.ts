@@ -247,6 +247,42 @@ describe('undo store', () => {
     assert.equal(env.read('a.md').toString(), 'a');
   });
 
+  it('a move that also changes content (archive) is restored byte for byte, and rolled back after a crash at any point', () => {
+    const env = setup({ 'notes/a.md': '---\r\ntitle: A\r\n---\r\nbody\r\n', 'b.md': 'b' });
+    fs.chmodSync(path.join(env.vaultPath, 'notes/a.md'), 0o640);
+    const original = env.read('notes/a.md');
+    const archived = B('---\r\ntitle: A\r\nstatus: archived\r\n---\r\nbody\r\n');
+    const m = runOperation(env, 'test op', [{ type: 'move', from: 'notes/a.md', path: '_archive/notes/a.md', data: archived }])!;
+    const op = m.ops[0]!;
+    assert.ok(op.type === 'move' && op.sha256_before === sha256(original) && op.sha256_after === sha256(archived) && op.mode === 0o640);
+    assert.ok(!env.exists('notes/a.md'));
+    assert.deepEqual(env.read('_archive/notes/a.md'), archived);
+    assert.equal(mode(path.join(env.vaultPath, '_archive/notes/a.md')), 0o640);
+    assert.equal(readManifest(env, m.operation_id).ops[0]!.sha256_after, sha256(archived), 'the manifest round-trips');
+    restore(env, m.operation_id);
+    assert.deepEqual(env.read('notes/a.md'), original);
+    assert.ok(!env.exists('_archive/notes/a.md'));
+
+    // A failure right after publishing rolls back to the original bytes at the original path.
+    assert.throws(() => runOperation({ ...env, afterPublish: () => { throw new Error('crash'); } }, 'test op', [
+      { type: 'move', from: 'notes/a.md', path: '_archive/notes/a.md', data: archived },
+    ]), /crash/);
+    assert.deepEqual(env.read('notes/a.md'), original);
+    assert.ok(!env.exists('_archive/notes/a.md'));
+
+    // A crash between the rename and the rewrite (destination still holds the original bytes) is recovered too.
+    const half = runOperation(env, 'test op', [{ type: 'move', from: 'notes/a.md', path: '_archive/notes/a.md', data: archived }])!;
+    const dir = path.join(env.stateDir, UNDO_DIR, half.operation_id);
+    const manifest = JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json'), 'utf8')) as { status: string };
+    manifest.status = 'pending';
+    fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify(manifest));
+    fs.rmSync(path.join(dir, 'done.jsonl'));
+    fs.writeFileSync(path.join(env.vaultPath, '_archive/notes/a.md'), original);
+    assert.deepEqual(recoverPending(env), [half.operation_id]);
+    assert.deepEqual(env.read('notes/a.md'), original);
+    assert.ok(!env.exists('_archive/notes/a.md'));
+  });
+
   it('lists operations newest first', () => {
     let t = Date.parse('2026-01-01T00:00:00Z');
     const env = setup({ 'a.md': 'a' });

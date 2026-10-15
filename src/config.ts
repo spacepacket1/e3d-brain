@@ -34,6 +34,20 @@ export interface Config {
   hooks: HooksConfig;
   llm: LlmConfig;
   recallLog: RecallLogConfig;
+  inbox: InboxConfig;
+  cognition: CognitionConfig;
+}
+
+/** Flood control for typed proposals (cognition Phase 2). */
+export interface InboxConfig {
+  /** A cognition run stops creating proposals once this many are open (`status: proposed`) in `_inbox/`. */
+  maxPendingProposals: number;
+}
+
+/** Cognition run budgets (cognition Phase 2, C6); LLM caps are `llm.maxCallsPerRun` and `llm.maxInputCharsPerRun`. */
+export interface CognitionConfig {
+  /** Most proposals one run creates (`--max-proposals` overrides). */
+  maxProposalsPerRun: number;
 }
 
 /** `<stateDir>/recalls.jsonl` (cognition Phase 1): records older than this are dropped by `ebrain recalls prune`. */
@@ -129,6 +143,10 @@ const MAX_AUDIT_SEGMENT_MB = 4096;
 export const DEFAULT_JOURNAL: Readonly<JournalConfig> = { ttlDays: 90, maxEntryChars: 4000, maxEntriesPerHour: 60, maxTotalMB: 100 };
 export const DEFAULT_REFS: Readonly<RefsConfig> = { excerptChars: 400, maxHits: 5 };
 export const DEFAULT_RECALL_RETENTION_DAYS = 180;
+export const DEFAULT_MAX_PENDING_PROPOSALS = 50;
+export const DEFAULT_MAX_PROPOSALS_PER_RUN = 20;
+/** Upper bound for `inbox.maxPendingProposals`, `cognition.maxProposalsPerRun`, and `--max-proposals`. */
+export const MAX_PROPOSALS_CEILING = 10_000;
 /** Upper bounds for `refs.*`: excerpts and hits stay short so a book cannot be dumped through `search`. */
 export const MAX_REF_EXCERPT_CHARS = 1000;
 export const MAX_REF_HITS = 20;
@@ -244,7 +262,7 @@ function isInsideLexical(parent: string, child: string): boolean {
 export function parseConfig(raw: unknown, opts: { homeDir?: string } = {}): Config {
   const home = opts.homeDir ?? os.homedir();
   if (!isObject(raw)) throw new ConfigError('config must be a JSON object');
-  checkKeys(raw, ['vaultPath', 'stateDir', 'principal', 'mode', 'limits', 'network', 'scrub', 'embeddings', 'audit', 'journal', 'refs', 'hooks', 'llm', 'recallLog'], '');
+  checkKeys(raw, ['vaultPath', 'stateDir', 'principal', 'mode', 'limits', 'network', 'scrub', 'embeddings', 'audit', 'journal', 'refs', 'hooks', 'llm', 'recallLog', 'inbox', 'cognition'], '');
 
   const vaultPath = expandHome(requiredStr(raw, 'vaultPath', 'vaultPath'), 'vaultPath', home);
   const stateDir = expandHome(str(raw, 'stateDir', 'stateDir') ?? DEFAULT_STATE_DIR, 'stateDir', home);
@@ -358,6 +376,16 @@ export function parseConfig(raw: unknown, opts: { homeDir?: string } = {}): Conf
     throw new ConfigError('config key "recallLog.retentionDays" must be an integer from 1 to 36500');
   }
 
+  const countKey = (raw: Json, label: string, key: string, def: number): number => {
+    const v = raw[key] === undefined ? def : raw[key];
+    if (typeof v !== 'number' || !Number.isInteger(v) || v < 1 || v > MAX_PROPOSALS_CEILING) {
+      throw new ConfigError(`config key "${label}" must be an integer from 1 to ${MAX_PROPOSALS_CEILING}`);
+    }
+    return v;
+  };
+  const inboxRaw = section(raw, 'inbox', ['maxPendingProposals'], false);
+  const cognitionRaw = section(raw, 'cognition', ['maxProposalsPerRun'], false);
+
   return {
     vaultPath,
     stateDir,
@@ -373,6 +401,8 @@ export function parseConfig(raw: unknown, opts: { homeDir?: string } = {}): Conf
     hooks,
     llm,
     recallLog: { retentionDays },
+    inbox: { maxPendingProposals: countKey(inboxRaw, 'inbox.maxPendingProposals', 'maxPendingProposals', DEFAULT_MAX_PENDING_PROPOSALS) },
+    cognition: { maxProposalsPerRun: countKey(cognitionRaw, 'cognition.maxProposalsPerRun', 'maxProposalsPerRun', DEFAULT_MAX_PROPOSALS_PER_RUN) },
   };
 }
 
