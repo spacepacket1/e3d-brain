@@ -1,0 +1,11 @@
+{"kind":"thesis","id":"th_123","occurred":"2026-09-01T00:00:00Z","summary":"ETH outperforms BTC over 3 weeks","attributes":{"agent":"0xabc","status":"open"}}
+{"kind":"outcome","id":"oc_456","occurred":"2026-09-20T00:00:00Z","summary":"Thesis th_123 closed in profit","attributes":{"thesis":"th_123","result":"win","metric":"+4.2%"}}
+this line is not json
+{"kind":"thesis","id":"th bad id","occurred":"2026-09-01T00:00:00Z","summary":"bad id"}
+{"kind":"thesis","id":"th_feb30","occurred":"2026-02-30T00:00:00Z","summary":"impossible date"}
+
+{"kind":"thesis","id":"th_extra","occurred":"2026-09-01T00:00:00Z","summary":"unknown key","confidence":0.9}
+{"kind":"outcome","id":"oc_457","occurred":"2026-09-21T12:30:00.5Z","summary":"See https://e3d.example/outcomes/457 for details","attributes":{"thesis":"th_124","result":"loss","legs":[{"token":"ETH","pnl":-1.5}]}}
+{"kind":"thesis","id":"th_deep","occurred":"2026-09-01T00:00:00Z","summary":"too deep","attributes":{"a":{"b":{"c":{"d":1}}}}}
+{"kind":"thesis","id":"th_124","occurred":"2026-09-05T00:00:00Z","summary":"SOL breaks out","attributes":{"agent":"0xdef","status":"closed"}}
+{"kind":"thesis","id":"th_123","occurred":"2026-09-01T00:00:00Z","summary":"ETH outperforms BTC over 3 weeks","attributes":{"agent":"0xabc","status":"closed"}}

@@ -1,0 +1,27 @@
+{
+  "comment": "Files whose names cannot be checked in portably. 'files' are created in every materialized fixture (part of the golden dump). 'collisions' are created only by the collision tests; filesystems that fold case or normalization reject the second name.",
+  "files": [
+    {
+      "path": "Re\u0301sume\u0301.md",
+      "content": "# R\u00e9sum\u00e9\n\nAn NFD-named note.\n"
+    }
+  ],
+  "collisions": [
+    {
+      "path": "Collide.md",
+      "content": "# Collide upper\n\nupper twin\n"
+    },
+    {
+      "path": "collide.md",
+      "content": "# Collide lower\n\nlower twin\n"
+    },
+    {
+      "path": "No\u00ebl.md",
+      "content": "# No\u00ebl NFC\n\nnfc twin\n"
+    },
+    {
+      "path": "Noe\u0308l.md",
+      "content": "# No\u00ebl NFD\n\nnfd twin\n"
+    }
+  ]
+}

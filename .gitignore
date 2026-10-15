@@ -3,3 +3,5 @@ dist/
 .DS_Store
 .e3d-pilot/runs/
 .e3d-pilot/latest-run
+.spec2code/
+.spec2code-cog/

@@ -1,6 +1,6 @@
 # Feature Ticket: e3d-brain Cognition (consolidate, supersede, forget, reflect, feedback)
 
-Follow-up to `docs/e3d-brain-spec.md` (the **memory layer**, phases 1-12).
+Follow-up to `docs/e3d-brain-spec.md` (the **memory layer**, phases 1-15).
 The foundations this ticket first exposed as gaps (identity, revisions,
 citations, lifecycle, time, ranking, recall ids, shared LLM layer) have been
 **folded into the memory-layer spec**; the table below records where.
@@ -53,7 +53,7 @@ memory-layer spec (`e3d-brain-spec.md`) and this ticket relies on it.
 | G2 | **No revision identity in tool results.** Index stores a content hash but tools don't expose it; citations rot silently when a note is edited. | Citations must pin a revision and be checkable for staleness; accept must detect "note changed since proposal". | Folded: memory Phases 3 (`src/cite/`), 6 |
 | G3 | **No lifecycle states beyond proposed/accepted/rejected/journal.** | `superseded`, `archived`, `stale`, `pinned` are needed, with defined ranking effects. | Folded: memory Note schema, Phases 2, 4 |
 | G4 | **No time semantics.** Only `created`. Imported conversations and human notes need *occurred* vs *recorded*; supersession needs `valid_from/valid_until` and `as_of` queries. | Temporal reasoning. | Folded: memory Note schema, Phases 2, 6, 10 |
-| G5 | **Ranking is scattered** across old memory Phases 3, 4, 7, 12 (now 4, 8, 9, 11) with no single scoring function. Cognition adds more tiers. | One documented, tested ranking function. | Folded: memory Phase 4 (`rank.ts`), I13 |
+| G5 | **Ranking is scattered** across memory Phases 4, 8, 9, and 11 with no single scoring function. Cognition adds more tiers. | One documented, tested ranking function. | Folded: memory Phase 4 (`rank.ts`), I13 |
 | G6 | **Accept only moves a file.** Proposals include merge/supersede/archive, which *edit existing notes*. | Review queue with typed, previewable, undoable apply actions. | Phase 2 |
 | G7 | **Inbox is described as MCP-written; CLI-produced proposals are unspecified**, and `journal`/`read-only` instances have no sanctioned place for proposals. | Cognition runs from the owner CLI in *any* mode and writes to `_inbox/`. Mode governs MCP only. | Folded: memory I2 scope note, Phase 8 |
 | G8 | **LLM provider layer lives inside `propose` (memory-spec Phase 14).** | Shared `src/llm/` for all jobs; budgets; prompt versioning. | Folded: memory Phase 14 (`src/llm/`); budgets/prompt versioning extended in Phase 2 here |
@@ -127,13 +127,29 @@ These are in addition to I1-I13 of the memory-layer spec and are tested.
   source carries `untrusted_origin: true` and `taint_sources`, and the review
   UI shows it prominently.
 - **C9 Safe apply.** Applying a proposal is performed by the owner CLI only,
-  atomically (tmp + rename), after a revision check of every target, with the
-  previous contents saved in the Phase 1 undo store so
-  `ebrain review undo <proposal-id>` restores them.
+  as a crash-safe transaction, with the previous contents saved in the Phase 1
+  undo store so `ebrain review undo <proposal-id>` restores them. Protocol,
+  under the `src/lock.ts` lock `<stateDir>/locks/apply.lock`: (1) validate the
+  proposal (authenticated against its run record, Phase 2) and every target;
+  (2) write the undo transaction manifest with status `pending` and the full
+  list of planned ops; (3) for each op, re-check the target's **raw SHA-256**
+  (of the file bytes; `rev` is for citation freshness only) immediately before
+  publishing, then publish with `writeAtomic` / `createExclusive` /
+  `renameSafe`; (4) mark the manifest `committed`; (5) only then finalize the
+  proposal (status `accepted`, `applied`, move to `_inbox/_applied/`). A crash
+  leaves a `pending` manifest; `ebrain review recover` (also run
+  automatically at the start of the next apply) rolls back every op the
+  manifest records as done. A proposal stays `proposed` until step 5.
 - **C10 Never delete.** No job and no apply action removes a note; archive
   moves to `_archive/` and supersede sets frontmatter. **Archive is defined
   once:** set `status: archived` and `archived_at`, and move the file to
-  `_archive/<original-relative-path>`; the note keeps its `id`.
+  `_archive/<original-relative-path>`, except journal entries, which move to
+  `journal/_archive/<principal-id>/<path-after-the-principal-dir>` (the memory
+  layer's journal archive, shared with `ebrain journal prune`). A destination
+  name collision is resolved with `createExclusive` and a numeric suffix,
+  recorded in the manifest. The note keeps its `id`. **Undo exception:** undo
+  may remove a file that the same operation created (it never removes any
+  other file); that is not a deletion in the sense of this rule.
 - **C11 Mode-independent CLI.** Because jobs are CLI-only (C2), they work in
   any instance mode (`inbox`, `journal`, `read-only`); mode constrains MCP
   only.
@@ -150,14 +166,17 @@ These are in addition to I1-I13 of the memory-layer spec and are tested.
 
 Prerequisite: memory-layer Phases 1-9 and 14 implemented (they now include
 identity, revisions, citations, lifecycle, time, ranking, and recall ids).
-Run with `codex-spec-runner`. Phases 1-3 are required foundations here.
-Phases 4-8 are the jobs and can be run in any order after Phase 3, though
-value order is `supersede`, `consolidate`, `reflect`, `forget`,
-`feedback`/`gaps`.
+Run with `spec2code` (`--provider claude`). Phases 1-3 are required
+foundations here. Phases 4, 5, and 6 are jobs built in that order (Phase 6,
+`reflect`, depends on Phase 4's supersede-style proposals). Phase 7 (`forget`)
+needs only Phase 1's recall record; Phase 8 adds usage signals that `forget`
+then also consults. Phase numbers are the build order. Threshold defaults are
+config keys with documented defaults, and every job's tests use a fixture
+corpus of at least 20 positive and 20 negative cases.
 
 ```bash
-codex-spec-runner docs/e3d-brain-cognition-spec.md --preflight
-codex-spec-runner docs/e3d-brain-cognition-spec.md all --to 3
+spec2code docs/e3d-brain-cognition-spec.md --preflight --provider claude
+spec2code docs/e3d-brain-cognition-spec.md all --from 1 --to 3 --provider claude
 ```
 
 ## Phase 1 - Undo Store and ID Assignment
@@ -178,19 +197,29 @@ memory-layer spec.
   vault files (memory-layer `inbox accept/reject` are exempt: they only rewrite notes the model itself proposed), it saves the originals under
   `<stateDir>/undo/<operation-id>/` (preserving relative paths, mode `0600`;
   stored in the private state directory so it never pollutes the vault, git
-  history, or sync) and writes a manifest `{operation-id, created, files:[{path,
-  sha256_before, sha256_after}]}`. `restore(operation-id)` verifies the
-  *current* hashes equal `sha256_after` and refuses otherwise (the note was
-  edited since), then restores atomically. Undo is therefore machine-local;
+  history, or sync) and writes a manifest `{operation-id, created, status:
+  pending|committed|rolled_back, ops:[{type: rewrite|create|move, path, from?,
+  sha256_before?, sha256_after}]}`. `rewrite` saves the original bytes;
+  `create` has no original; `move` records source and destination. Hashes are
+  raw SHA-256 of file bytes. `restore(operation-id)` verifies every op's
+  *current* state equals `sha256_after` and refuses otherwise (the note was
+  edited since), then reverses the ops atomically: rewrite restores bytes,
+  create removes the created file (the C10 undo exception), move moves back. Undo is therefore machine-local;
   `docs/SETUP.md` says so. All paths go through `safe-path` (I1).
 - **`ebrain ids assign [--folder <f>] [--dry-run]`:** owner CLI only. Adds a
   ULID `id:` (and `schema: 1` if absent) to notes lacking an `id`, preserving
   all other frontmatter keys and body bytes exactly. The index records the
   old provisional id as an alias of the new id for as long as the index is not
   fully rebuilt (best effort; long-term citations should use assigned ids, and
-  jobs only use assigned ids per C3). Atomic per file; the whole run is one
-  undo operation.
+  jobs only use assigned ids per C3). Each file is a `rewrite` op; the whole run is one undo operation.
 - **`ebrain undo <operation-id>`** and `ebrain undo --list`.
+- **Recall record.** Extend the memory-layer `dispatch` so that every read
+  tool call also appends `{recall_id, ts, principal, ids: [{id, rev}]}` (at
+  most 500 ids per record, newest results first) to `<stateDir>/recalls.jsonl`
+  (`0600`, state dir only). The audit log is unchanged (its `returned` list may
+  be truncated); `forget` (Phase 7) and `report_use` (Phase 8) read
+  `recalls.jsonl`, never the truncated audit list. Retention
+  (`recallLog.retentionDays`, default 180) is enforced by an owner CLI prune.
 - Pinned handling: `pinned: true` is respected as a flag only (no behavior
   here); later jobs consult it.
 
@@ -231,8 +260,9 @@ Fixes G6, G9, G10, G11, G20 (G7 and G8 are folded into the memory layer).
   [--max-proposals N] [--dry-run] [--reconsider]` and `ebrain cognition runs`.
   Each run writes `<stateDir>/runs/<run-id>.json`: job, versions, provider and
   model (if any), budget settings, input note ids+revs (hashes), counts by
-  outcome, stop reason, and proposal ids. Runs refuse to start if another run
-  of the same job holds a lock file. No MCP tool starts or schedules jobs; a
+  outcome, stop reason, and proposal ids with each proposal's immutable-field digest. Runs refuse to start if another run
+  of the same job holds a lock (`src/lock.ts`). Writes to `rejections.json` and
+  `usage.jsonl` also go through that helper. No MCP tool starts or schedules jobs; a
   test asserts no MCP tool starts a job, reviews, accepts, or applies a proposal
   in any mode (the only cognition-related MCP tool is the read-side
   `report_use` added in Phase 8).
@@ -258,7 +288,16 @@ Fixes G6, G9, G10, G11, G20 (G7 and G8 are folded into the memory layer).
   ```
 
   The body holds a human-readable rationale, a **machine-applicable change
-  block** (exact frontmatter edits and/or new-file content), and a rendered
+  block** written in a **closed grammar of typed ops**, each referencing a
+  `target` listed in the proposal's `targets`: `set_frontmatter {target, key,
+  value}` (key from an allowlist: `status`, `superseded_by`, `superseded_at`,
+  `supersedes`, `valid_until`, `archived_at`, `merged_into`), `create_note
+  {path, content}`, `move_note {target, to}` (destination only per the C10
+  archive rule or `lessons/<principal-id>/`), and `append_section {target,
+  text}`. Paths go through `safe-path`; an op outside the grammar or outside
+  its proposal type's allowed ops invalidates the proposal. The change block
+  is documented and
+  schema-validated; it is also (exact frontmatter edits and/or new-file content), and a rendered
   preview. Proposals are written by the CLI in **any mode** (G7); the existing
   rule "MCP writes only per mode" is unchanged.
 - **Review queue (G6, G20).** `ebrain review list|show|diff|accept|edit|
@@ -268,8 +307,17 @@ Fixes G6, G9, G10, G11, G20 (G7 and G8 are folded into the memory layer).
     still matches (else mark proposal `stale` and refuse), save originals in
     the undo store (Phase 1), apply atomically, set proposal `status: accepted` and
     `applied: <ts>`, and move it to `_inbox/_applied/`.
-  - `edit` opens `$EDITOR` on the proposal body/change block, re-validates the
-    schema, and keeps it proposed.
+    - `edit` opens `$EDITOR` on the proposal body/change block, re-validates the
+    schema, and keeps it proposed. `targets`, `evidence`, `proposal_key`,
+    `proposal_type`, `job`, and the op targets are **immutable**: their digest
+    is recorded in the run record, and `accept` refuses a proposal whose
+    immutable fields differ (reject and re-run instead). Prose and
+    `create_note` content may be edited.
+  - **Authentication.** `accept` applies only proposals whose id and immutable
+    digest appear in a run record under `<stateDir>/runs/`; frontmatter
+    claims (`origin: cli`, `author: ebrain-*`, `kind: proposal`) are never
+    trusted on their own. `capture` and `journal_append` reject any attempt to
+    set those fields (tests).
   - `reject --reason` moves to `_inbox/_rejected/` and records the
     `proposal_key` in `<stateDir>/rejections.json`.
   - `undo <id>` restores the saved originals if the current revs match what
@@ -460,12 +508,17 @@ Fixes G13.
   rather than a duplicate.
 - Output goes to `_inbox/` (C1). On accept, the lesson is written to
   `lessons/<principal-id>/` as `status: accepted`, `kind: lesson`,
-  `derived_from` (citations in the memory-layer grammar), and ranks above uncited journal
-  lessons per the memory-layer ranking tiers (Phase 4 `rank.ts`; register the new tiers there).
+  `derived_from` (citations in the memory-layer grammar), and, as a curated note, is
+  tier T1 under the memory-layer `effectiveTier` function, above all journal
+  lessons; no new tiers are added and `rank.ts` is untouched.
 - Taint propagation (C8): lessons derived from `untrusted_origin` journal
   entries are flagged.
-- Guardrails: no lesson may instruct an external action; lesson text is
-  scrubbed (strict mode); the job refuses to run if no evidence source is
+- Guardrails: a lesson is limited to the structured fields (lesson text,
+  `applies_when`, the expected-vs-actual comparison). Lesson text containing a
+  URL, a wallet-style `0x` address, a code fence, or a documented deny-list of
+  action verbs (for example transfer, sign, approve, send, withdraw, execute) is
+  dropped and counted, and `review show` prints a standing "advisory,
+  unverified" banner on every lesson. Lesson text is scrubbed (strict mode); the job refuses to run if no evidence source is
   configured, rather than reflecting without ground truth.
 - Optional human-brain variant: with a `decision` note and a later note whose
   `sources` cite it and records an outcome, propose a lesson using the same
@@ -495,9 +548,9 @@ Fixes G13.
 ### Requirements
 
 - Staleness signals (deterministic): age since last `occurred`/modified,
-  `recall_count` and `last_recalled` (from the memory-layer audit `returned`
-  data (Phase 5), read across all audit segments and rolled up into a derived
-  `note_stats` table, rebuildable from the audit segments),
+  `recall_count` and `last_recalled` (from the Phase 1 recall record,
+  `recalls.jsonl`, rolled up into a derived `note_stats` table, rebuildable
+  from it),
   superseded/archived status of linked notes, and journal `expires`.
 - Candidates: notes with no recall in `forget.windowDays` (default 180), older
   than `forget.minAgeDays` (default 90), not `pinned`, not cited by any
@@ -522,7 +575,7 @@ Fixes G13.
   move to `_archive/`) and `undo` restores it at the original path; search
   hides archived by default.
 - Existing `journal prune` tests still pass with default settings.
-- Recall stats rebuild identically from `audit.jsonl` after deleting the
+- Recall stats rebuild identically from `recalls.jsonl` after deleting the
   derived table.
 - `bash tests/cog-phase07.sh` passes.
 
@@ -540,8 +593,8 @@ Fixes G15, G18.
 - **`report_use` MCP tool** (available in every mode, including `read-only`):
   `report_use({ recall_id, note_ids?, outcome_ref?, helpful? })` appends one
   event to `<stateDir>/usage.jsonl` (state dir only, `0600`, never the vault).
-  Validation: `recall_id` must exist in the audit log for this principal;
-  `note_ids` must be a subset of the ids returned for that `recall_id`;
+  Validation: `recall_id` must exist in `recalls.jsonl` for this principal;
+  `note_ids` must be a subset of the ids recorded for that `recall_id`;
   `outcome_ref` must be a well-formed citation. Events are labeled
   `self_reported`; an event with an `outcome_ref` that resolves via Phase 3
   evidence is additionally labeled `evidence_linked` at rollup time. Rate and
@@ -549,17 +602,21 @@ Fixes G15, G18.
   This is the only state write permitted to MCP outside the mode's vault
   fence (the memory-layer I2 scope note already allows state-directory events
   in every mode; they never touch the vault). Add `report_use` to every mode in
-  `tests/fixtures/tools-by-mode.json` in the same change.
+  `tests/fixtures/tools-by-mode.json` in the same change, with a namespaced
+  phase id (`cog-8`): extend the `expectedTools` helper to take a memory phase
+  and a cognition phase, so memory-phase assertions never include it.
 - **Rollups:** derived `note_usage` table (rebuildable from `audit.jsonl` and
   `usage.jsonl`): `recalls`, `reported_used`, `evidence_linked_good`,
   `evidence_linked_bad` as integers. Exposed by `ebrain cognition stats
-  usage` and used by `forget` (Phase 7). A **bounded** ranking nudge is
+  usage` and consulted by `forget` (Phase 7 gains these signals here as an
+  extension). A **bounded** ranking nudge is
   allowed: `rank.usageBoost` (default off) adds at most one tier-internal
   position weight based only on `evidence_linked_good` minus
   `evidence_linked_bad`, capped; self-reported events never affect ranking.
   Document why (agents can game self-reporting). With `usageBoost` on,
-  result ordering also depends on the evidence-linked counters, so I11
-  determinism holds only for a fixed counter state; the default (off) keeps
+  result ordering also depends on the evidence-linked counters. **Amendment of
+  I11** for this feature only: determinism holds for a fixed vault, config, and
+  counter state; the default (off) keeps
   ordering a pure function of vault and config.
 - **Query log (opt-in) for `gaps` (G18).** `queryLog.enabled` (default false).
   When enabled, scrubbed query text, `recall_id`, result count, and top-hit
@@ -569,7 +626,10 @@ Fixes G15, G18.
   are not logged.
 - **`gaps` job:** `ebrain cognition run gaps` clusters logged queries by
   deterministic text similarity, ranks clusters by frequency and
-  poor-result rate (counts only), and writes `proposal_type: gap` items to
+  poor-result rate (counts only), and writes `proposal_type: gap` items (no change block, `targets: []`, and
+  `evidence: []`; C3's evidence requirement is waived because they change
+  nothing) with `proposal_key` = hash of (job, cluster hash, type), where the
+  cluster hash is the SHA-256 of the sorted normalized query token set, to
   `_inbox/`: "asked N times, best result tier T, M results" with example
   scrubbed queries. No LLM required; an optional LLM pass may only rename
   cluster labels, never change counts.
@@ -610,8 +670,8 @@ Fixes G17.
 - **Replay evaluation (when the vault is a git repo).** `ebrain eval replay
   --job <job> --at <commit-or-date>` extracts the vault at that commit into a temp
   directory (using `git archive` through an argument-array subprocess, never a
-  shell string, and never `git worktree`/`checkout` in the owner's repository), builds a temporary index there, runs the
-  job in shadow mode, and compares its proposals with changes the owner
+  shell string, and never `git worktree`/`checkout` in the owner's repository), builds a temporary index there under a temporary state dir (never the owner's
+  `stateDir`), runs the job in shadow mode, and compares its proposals with changes the owner
   actually made after that point (for example notes later superseded, archived,
   or lessons later written). Reports precision/recall-style counts against
   those later actions. Requires a clean git history; otherwise exits with a
