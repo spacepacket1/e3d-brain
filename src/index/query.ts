@@ -3,15 +3,52 @@
 
 import type { Db } from './db.js';
 
+/** Question and glue words that carry no topic. Dropped from plain queries ("who accepts proposals" searches for "accepts proposals"). */
+const STOPWORDS = new Set([
+  'a', 'an', 'the', 'is', 'are', 'was', 'were', 'be', 'been', 'am', 'do', 'does', 'did', 'to', 'of', 'in', 'on', 'at',
+  'for', 'with', 'by', 'as', 'from', 'about', 'who', 'what', 'when', 'where', 'why', 'how', 'which', 'that', 'this',
+  'these', 'those', 'it', 'its', 'i', 'we', 'you', 'they', 'he', 'she', 'my', 'our', 'your', 'and', 'or', 'not', 'can',
+  'could', 'should', 'would', 'will', 'has', 'have', 'had', 'there', 'if', 'then', 'so', 'than',
+]);
+
 /**
- * Turn free text into a safe FTS5 query: every word becomes a quoted term
+ * The searchable words of free text: NFC words, de-duplicated (case-insensitively), with stopwords removed.
+ * A query made only of stopwords keeps them, so it still searches for something.
+ */
+export function searchTerms(text: string): string[] {
+  const words = text.normalize('NFC').match(/[\p{L}\p{N}\p{M}_]+/gu) ?? [];
+  const seen = new Set<string>();
+  const all: string[] = [];
+  for (const w of words) {
+    const k = w.toLowerCase();
+    if (!seen.has(k)) {
+      seen.add(k);
+      all.push(w);
+    }
+  }
+  const content = all.filter((w) => !STOPWORDS.has(w.toLowerCase()));
+  return content.length > 0 ? content : all;
+}
+
+/**
+ * Turn free text into a safe FTS5 query: every searchable word becomes a quoted term
  * (implicit AND), so FTS5 operators and syntax in user text are inert.
  * Returns undefined when the text has no searchable words.
  */
 export function ftsQuery(text: string): string | undefined {
-  const words = text.normalize('NFC').match(/[\p{L}\p{N}\p{M}_]+/gu);
-  if (!words || words.length === 0) return undefined;
-  return words.map((w) => `"${w}"`).join(' ');
+  const terms = searchTerms(text);
+  if (terms.length === 0) return undefined;
+  return terms.map((w) => `"${w}"`).join(' ');
+}
+
+/**
+ * The looser form of `ftsQuery`: any word may match (quoted terms joined by OR), ranked by BM25. Used only as a
+ * fallback when the strict query finds nothing visible. Undefined when there are fewer than two words (no looser form).
+ */
+export function ftsQueryAny(text: string): string | undefined {
+  const terms = searchTerms(text);
+  if (terms.length < 2) return undefined;
+  return terms.map((w) => `"${w}"`).join(' OR ');
 }
 
 export interface ChunkMatch {
