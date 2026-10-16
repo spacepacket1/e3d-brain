@@ -166,7 +166,7 @@ These are in addition to I1-I13 of the memory-layer spec and are tested.
 
 Prerequisite: memory-layer Phases 1-9 and 14 implemented (they now include
 identity, revisions, citations, lifecycle, time, ranking, and recall ids).
-Run with `spec2code` (`--provider claude`). Phases 1-3 are required
+Run with `e3d-code` (`--provider claude`). Phases 1-3 are required
 foundations here. Phases 4, 5, and 6 are jobs built in that order (Phase 6,
 `reflect`, depends on Phase 4's supersede-style proposals). Phase 7 (`forget`)
 needs only Phase 1's recall record; Phase 8 adds usage signals that `forget`
@@ -175,8 +175,8 @@ config keys with documented defaults, and every job's tests use a fixture
 corpus of at least 20 positive and 20 negative cases.
 
 ```bash
-spec2code docs/e3d-brain-cognition-spec.md --preflight --provider claude
-spec2code docs/e3d-brain-cognition-spec.md all --from 1 --to 3 --provider claude
+e3d-code docs/e3d-brain-cognition-spec.md --preflight --provider claude
+e3d-code docs/e3d-brain-cognition-spec.md all --from 1 --to 3 --provider claude
 ```
 
 ## Phase 1 - Undo Store and ID Assignment

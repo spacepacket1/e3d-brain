@@ -5,5 +5,7 @@ dist/
 .e3d-pilot/latest-run
 .spec2code/
 .spec2code-cog/
+.e3d-code/
+.e3d-code-cog/
 __pycache__/
 *.pyc

@@ -7,7 +7,7 @@ config override env var `EBRAIN_CONFIG`.
 
 Revised after two review passes (a pre-build review and an `e3d-debate` with
 two models; transcript in `docs/debates/2026-10-14-spec-review/`). Phases were
-split and reordered; `spec2code` accepts only integer phase numbers, hence no
+split and reordered; `e3d-code` accepts only integer phase numbers, hence no
 lettered sub-phases. Final order: 1 scaffold, 2 scanner/index, 3 identity and
 citation grammar, 4 fence/ranking/registry/dispatch, 5 principal enforcement
 and audit, 6 MCP server and packaging, 7 scrubber, 8 inbox, 9 agent journal,
@@ -346,7 +346,7 @@ e3d-brain/
 
 ## Running This Spec
 
-Run with `spec2code` (the successor of `codex-spec-runner`; same phase format),
+Run with `e3d-code` (the successor of `codex-spec-runner`; same phase format),
 using `--provider claude`. Phases 1-8 are the core memory layer for people
 (index, identity, citations/ranking, MCP read tools, audit, inbox, scrubber).
 Phase 9 adds agent mode and needs Phases 1-8. Phases 10 and 11 add importers and
@@ -356,9 +356,9 @@ cognition spec**. The follow-up `docs/e3d-brain-cognition-spec.md` builds on
 Phases 1-9 and 14.
 
 ```bash
-spec2code docs/e3d-brain-spec.md --preflight --provider claude
-spec2code docs/e3d-brain-spec.md all --from 1 --to 8 --provider claude
-spec2code docs/e3d-brain-spec.md 9 --provider claude
+e3d-code docs/e3d-brain-spec.md --preflight --provider claude
+e3d-code docs/e3d-brain-spec.md all --from 1 --to 8 --provider claude
+e3d-code docs/e3d-brain-spec.md 9 --provider claude
 ```
 
 Intended pause points for human review: after Phase 1 (safe-path API), after

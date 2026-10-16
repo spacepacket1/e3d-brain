@@ -233,7 +233,7 @@ setups, scheduling, and running on a Linux server are in
 ## How it was built
 
 The system was designed as two phased specs and built phase by phase by AI
-(`spec2code`, one fresh model session per phase), with each phase's tests
+(`e3d-code`, one fresh model session per phase), with each phase's tests
 re-run independently before it was committed. Before any code existed, each
 spec went through multi-model design debates (Claude and Codex, two rounds
 each) that found real flaws: a scrubber ordered after the writer that needed it,
