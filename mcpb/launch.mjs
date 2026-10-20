@@ -5,9 +5,9 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const here = path.dirname(new URL(import.meta.url).pathname);
+const here = path.dirname(fileURLToPath(import.meta.url));
 const stateDir = path.join(os.homedir(), '.e3d-brain-desktop');
 fs.mkdirSync(stateDir, { recursive: true, mode: 0o700 });
 fs.chmodSync(stateDir, 0o700);
