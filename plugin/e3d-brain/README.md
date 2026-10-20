@@ -37,6 +37,14 @@ something: "Remember that we will revisit the database choice in Q4." That lands
 in `_inbox/` as a proposal. Accept it from the CLI (`ebrain inbox accept <id>`) or
 by moving the file in your notes app.
 
+## How it starts
+
+The plugin's `.mcp.json` runs `node ${CLAUDE_PLUGIN_ROOT}/launch.mjs`, a short file in this
+plugin that starts the `ebrain` command from your global install as `ebrain mcp --auto`,
+and prints how to install it if it is missing. It runs nothing else and downloads nothing.
+The server is a separate, versioned npm package rather than a copy inside the plugin
+because it uses a native SQLite build.
+
 ## Data
 
 Everything stays on your computer. The server reads your vault, keeps a search
