@@ -49,6 +49,30 @@ ebrain doctor
 4. Register the server with your MCP client (next section) and restart the
    client.
 
+## One-command setup (`ebrain setup`)
+
+`ebrain setup` is `ebrain init` plus registration. It reuses `~/.e3d-brain/config.json`
+if it exists (or creates it, with the vault at `~/Brain` unless `--vault` says
+otherwise, in `inbox` mode), then registers the server, by absolute node and
+script path, with each client it finds:
+
+- **Claude Code:** `claude mcp add --scope user e3d-brain -e EBRAIN_CONFIG=<config> -- <node> <script> mcp`
+- **Codex:** `codex mcp add e3d-brain --env EBRAIN_CONFIG=<config> -- <node> <script> mcp`
+- **Claude Desktop:** adds an `mcpServers.e3d-brain` entry to `claude_desktop_config.json`
+  (macOS `~/Library/Application Support/Claude/`, Linux `~/.config/Claude/`), keeping every other
+  setting, and saves the original once as `claude_desktop_config.json.ebrain-backup`. A file that is
+  not valid JSON is left untouched.
+
+Flags: `--vault <dir>`, `--mode inbox|read-only`, `--client claude-code,claude-desktop,codex|all`,
+`--config <file>`, `--yes` (do not ask), `--dry-run` (print the plan, change nothing), `--force`
+(replace an existing registration). It refuses to run from a temporary download cache, because the
+registration would not survive; install the package permanently first. It never registers a command
+that downloads anything when the client starts, and it uses no network.
+
+`ebrain mcp --auto` is the same server with a zero-setup start: if no config exists it creates the
+default one (vault from `$EBRAIN_VAULT`, else `~/Brain`; mode from `$EBRAIN_MODE`, else `inbox`) and
+reports that on stderr. The Claude plugin in `plugin/e3d-brain/` launches it this way.
+
 ## Connecting Claude (MCP over stdio)
 
 `ebrain mcp` runs the MCP server over stdio: stdout carries protocol frames

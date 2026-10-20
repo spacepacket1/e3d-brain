@@ -791,7 +791,11 @@ export function registerReadTools(env: ReadToolEnv, registry: ToolRegistry): voi
     {
       name: 'search',
       modes: MODES,
-      description: 'Full-text (BM25) search over the vault, fused with embedding similarity when embeddings are configured. Returns ranked passages with path, heading_path, excerpt, and a revision-pinned citation.',
+      description:
+        "Search the user's own notes (their memory vault). Use this FIRST, before answering from general knowledge, whenever a question concerns the user's " +
+        'past decisions, projects, preferences, people, history, or "what did we decide / why / how do we"; and whenever they refer to their notes or e3d-brain. ' +
+        'Full-text (BM25) search, fused with embedding similarity when embeddings are configured. Returns ranked passages with path, heading_path, excerpt, ' +
+        'and a revision-pinned citation: cite it in your answer, prefer a newer note over an older one that it supersedes, and say plainly when nothing relevant is found instead of guessing.',
       schema: env.mode === 'journal' ? SEARCH_SCHEMA_JOURNAL : SEARCH_SCHEMA,
       auditArgs: { folder: 'path' },
       handler: (args, ctx) => search(env, args, ctx.maxChars),
@@ -802,7 +806,7 @@ export function registerReadTools(env: ReadToolEnv, registry: ToolRegistry): voi
     {
       name: 'read_note',
       modes: MODES,
-      description: 'Read one note by vault-relative path.',
+      description: 'Read the full text of one note by vault-relative path (the path field of a search result). Use it after search when an excerpt is not enough to answer.',
       schema: READ_NOTE_SCHEMA,
       auditArgs: { path: 'path' },
       handler: (args, ctx) => readNote(env, args, ctx.maxChars),
@@ -813,7 +817,7 @@ export function registerReadTools(env: ReadToolEnv, registry: ToolRegistry): voi
     {
       name: 'list_notes',
       modes: MODES,
-      description: 'List notes, optionally by folder, tag, and status, in ranking order.',
+      description: "List the user's notes, optionally by folder, tag, and status, in ranking order. Use it to browse what the vault holds when search has no obvious query.",
       schema: env.mode === 'journal' ? LIST_NOTES_SCHEMA_JOURNAL : LIST_NOTES_SCHEMA,
       auditArgs: { folder: 'path' },
       handler: (args, ctx) => listNotes(env, args, ctx.maxChars),
@@ -824,7 +828,7 @@ export function registerReadTools(env: ReadToolEnv, registry: ToolRegistry): voi
     {
       name: 'related',
       modes: MODES,
-      description: 'Notes structurally related to a note: backlinks, outgoing links, and notes sharing tags.',
+      description: 'Notes structurally related to a note: backlinks, outgoing links, and notes sharing tags. Use it to find the context around a decision after you have found the note.',
       schema: RELATED_SCHEMA,
       auditArgs: { path: 'path' },
       handler: (args, ctx) => related(env, args, ctx.maxChars),

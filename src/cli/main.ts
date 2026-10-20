@@ -11,6 +11,7 @@ import { runDoctor } from './doctor.js';
 import { runInbox } from './inbox-commands.js';
 import { runIndexCommand, runReindex, type CommandResult } from './index-commands.js';
 import { runInit, terminalPrompt } from './init.js';
+import { bootstrapConfig, runSetup } from './setup.js';
 import { isConversationImportSource, runConversationImport } from './import-commands.js';
 import { runHook } from './hook-commands.js';
 import { runImport, runJournal } from './journal-commands.js';
@@ -30,7 +31,11 @@ const USAGE = `usage: ebrain <command>
 commands:
   init [flags]      write config.json, create the state dir and vault folders, print MCP snippets
                     (--vault, --principal, --type, --mode, --state-dir, --config; prompts on a terminal)
+  setup [flags]     create the config and vault if missing, then register the server with Claude Code,
+                    Claude Desktop, and Codex where found (--vault, --mode, --client, --yes, --dry-run, --force)
   mcp               run the MCP server over stdio (stdout carries protocol frames only)
+  mcp --auto        the same, but create a default config first if none exists (vault from $EBRAIN_VAULT,
+                    else ~/Brain; mode from $EBRAIN_MODE, else inbox); for plugins and other zero-setup launchers
   mcp --http [--host <loopback>] [--port <n>]
                     serve MCP over Streamable HTTP on loopback only (default 127.0.0.1:8787); needs a bearer token
   token create --principal <id>
@@ -145,6 +150,15 @@ async function runInitCommand(args: readonly string[]): Promise<number> {
   }
 }
 
+async function runSetupCommand(args: readonly string[]): Promise<number> {
+  const terminal = process.stdin.isTTY ? terminalPrompt() : undefined;
+  try {
+    return emit(await runSetup(args, terminal === undefined ? {} : { prompt: terminal.prompt }));
+  } finally {
+    terminal?.close();
+  }
+}
+
 async function runMcpHttp(args: readonly string[]): Promise<number> {
   let host: string | undefined;
   let port = DEFAULT_HTTP_PORT;
@@ -174,7 +188,16 @@ async function runMcpHttp(args: readonly string[]): Promise<number> {
 
 async function runMcp(args: readonly string[]): Promise<number> {
   if (args[0] === '--http') return runMcpHttp(args.slice(1));
-  if (args.length > 0) {
+  if (args[0] === '--auto' && args.length === 1) {
+    try {
+      // stdout carries protocol frames only: report on stderr.
+      const boot = await bootstrapConfig({});
+      if (boot.created) process.stderr.write(`ebrain mcp: created ${boot.cfgPath} (vault ${boot.vault}, mode ${boot.mode})\n`);
+    } catch (err) {
+      process.stderr.write(`ebrain mcp: ${err instanceof Error ? err.message : String(err)}\n`);
+      return 1;
+    }
+  } else if (args.length > 0) {
     process.stderr.write(`ebrain mcp: unexpected argument ${JSON.stringify(args[0])}\n`);
     return 2;
   }
@@ -256,6 +279,8 @@ export function main(argv: readonly string[]): number | Promise<number> {
       return emit(runQueries(rest));
     case 'init':
       return runInitCommand(rest);
+    case 'setup':
+      return runSetupCommand(rest);
     case 'mcp':
       return runMcp(rest);
     default:

@@ -197,14 +197,27 @@ before they ever create review work.
 
 ```bash
 npm install -g e3d-brain
-ebrain init --vault ~/Brain --principal you     # writes a config, prints the MCP snippet for your client
-ebrain doctor --strict
+ebrain setup          # creates ~/.e3d-brain/config.json and a ~/Brain vault, registers with the clients it finds
 ```
 
-Then add the printed snippet to Claude Code, Claude Desktop, or any other MCP
-client that can launch a stdio server. A search through the server has been
-checked end to end from OpenAI's Codex CLI; Claude Code and Claude Desktop use
-the snippets `init` prints. Requires Node 22 or later.
+`ebrain setup` finds Claude Code, Claude Desktop, and Codex on this machine and
+registers the server with each one (it asks first; `--dry-run` previews, `--yes`
+skips the question, `--vault <dir>` picks your notes folder, `--mode read-only`
+makes it search-only). Then start a new Claude session and ask about your notes.
+To check it: `ebrain doctor --strict`. Requires Node 22 or later.
+
+Prefer to wire it up by hand, or use another MCP client that launches a stdio
+server? `ebrain init` prints the snippets instead.
+
+### Which route for which Claude
+
+| Where you use Claude | Use |
+|---|---|
+| Claude Code | `ebrain setup`, or the [plugin](plugin/e3d-brain/README.md) (adds a skill so Claude checks your notes unprompted) |
+| Claude Desktop, Chat tab | `ebrain setup`, or the one-click `.mcpb` bundle below |
+| Codex CLI | `ebrain setup` |
+| Cowork | the plugin's local server should load in Cowork sessions on your computer; not yet tested here |
+| ChatGPT | needs a remote server or OpenAI's tunnel client; not set up |
 
 ### Claude Desktop (one-click bundle)
 
