@@ -38,7 +38,8 @@ accept a proposal.
   not start.
 - **Verified so far:** the extracted bundle, run from a folder with a space in its
   path, over stdio with the MCP SDK (8 tools in `inbox`, 6 in `read-only`, a search
-  returned the expected cited note). Only macOS arm64 has been exercised. The
-  install into the Claude Desktop app is being checked by hand.
+  returned the expected cited note). Installed in the Claude Desktop app on
+  an Apple-silicon MacBook (Desktop's built-in Node v24.22.0) and confirmed working.
+  Only macOS arm64 has been exercised.
 - Cowork (Claude's sandboxed agent mode) failed to start the server in the same log
   ("Couldn't start for Cowork and Code sessions"), so do not rely on it there.
