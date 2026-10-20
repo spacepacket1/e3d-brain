@@ -3,9 +3,20 @@
   "displayName": "e3d-brain memory",
   "version": "0.1.1",
   "description": "Local-first memory over your own Markdown notes: Claude checks them before answering questions about your past decisions, cites what it finds, and proposes new notes into a review inbox you control.",
-  "author": { "name": "Chris Bloom", "url": "https://github.com/spacepacket1" },
+  "author": {
+    "name": "Chris Bloom",
+    "url": "https://github.com/spacepacket1"
+  },
   "homepage": "https://github.com/spacepacket1/e3d-brain",
   "repository": "https://github.com/spacepacket1/e3d-brain",
   "license": "MIT",
-  "keywords": ["memory", "notes", "obsidian", "mcp"]
+  "keywords": [
+    "memory",
+    "notes",
+    "obsidian",
+    "mcp"
+  ],
+  "privacyPolicyUrl": "https://github.com/spacepacket1/e3d-brain/blob/main/docs/PRIVACY.md",
+  "supportUrl": "https://github.com/spacepacket1/e3d-brain/issues",
+  "termsOfServiceUrl": "https://github.com/spacepacket1/e3d-brain/blob/main/LICENSE"
 }

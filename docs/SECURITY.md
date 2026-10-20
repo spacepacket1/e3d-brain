@@ -73,7 +73,8 @@ They apply to every phase and are tested. Later phases must not weaken them.
   in `network.allowedHosts`. A test greps the source tree for network APIs and
   fails if they appear outside `src/net/` (this includes the Phase 15 HTTP
   server). `child_process` may appear only in `src/exec/`, which spawns fixed
-  binaries (`pdftotext`, `git`) with argument arrays, never a shell string.
+  binaries (`pdftotext`, `git`, and, for `ebrain setup`, the owner's own `claude` and `codex` CLIs) with argument
+  arrays, never a shell string.
 - **I4 No telemetry / auto-update / runtime installs.** Enforced by a source
   scan test.
 - **I5 Scrub before persist.** Text from conversations, books, captures,

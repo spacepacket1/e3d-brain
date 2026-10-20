@@ -27,6 +27,15 @@ describe('plugin/e3d-brain', () => {
     assert.ok(fs.readFileSync(path.join(root, 'plugin/e3d-brain/README.md'), 'utf8').split(/\s+/).length >= 40);
   });
 
+  it('declares privacy, support, and terms URLs, and the privacy policy file exists', () => {
+    for (const key of ['privacyPolicyUrl', 'supportUrl', 'termsOfServiceUrl']) {
+      assert.match(String(plugin[key]), /^https:\/\/github\.com\/spacepacket1\/e3d-brain\//, key);
+    }
+    assert.match(String(plugin['privacyPolicyUrl']), /docs\/PRIVACY\.md$/);
+    assert.ok(fs.existsSync(path.join(root, 'docs/PRIVACY.md')));
+    assert.ok(fs.existsSync(path.join(root, 'LICENSE')));
+  });
+
   it('launches the server by running a file in the plugin with plain arguments, and has no secrets or absolute paths', () => {
     const raw = fs.readFileSync(path.join(root, 'plugin/e3d-brain/.mcp.json'), 'utf8');
     const mcp = JSON.parse(raw) as { mcpServers: Record<string, { command: string; args: string[]; env?: unknown }> };
