@@ -4,7 +4,7 @@
 
 <h1 align="center">e3d-brain</h1>
 
-<p align="center"><b>A memory that outlives the session, and a mind that tidies it.</b></p>
+<p align="center"><b>Memory you own and can audit, and a mind that tidies it.</b></p>
 
 <p align="center">
   <a href="https://www.youtube.com/watch?v=AmsJmRBiwiI">
@@ -14,18 +14,22 @@
   <a href="https://www.youtube.com/watch?v=AmsJmRBiwiI"><b>▶ Watch the concept film</b></a> (1:52)
 </p>
 
-Every AI session starts blank. Claude Code forgets last week's decision. An
-agent repeats the mistake it made on Tuesday. A team re-explains what it
-already settled. The records exist, in a ledger here and a log there, but the
-people and agents doing the work can't *reach* them at the moment they matter.
+AI tools remember more than they used to. But that memory has limits. It is
+partial: it keeps preferences and facts, and loses the rationale, the rejected
+options, and the open questions. It is siloed: it lives inside one vendor's
+product, and does not follow you to another machine, another model, or from a
+person to an agent. And it is opaque: you can't see exactly what it holds, tell
+which entry is stale, or check where a claim came from. Give it a few months
+and an old decision quietly contradicts a new one, with nothing to say which
+still stands.
 
-`e3d-brain` is a small, local-first memory server that fixes that. It sits over
-a plain folder of Markdown files (an [Obsidian](https://obsidian.md) vault),
-speaks [MCP](https://modelcontextprotocol.io), and gives Claude and the E3D
-agents **continuity**. A second layer, **cognition**, then looks after the
-memory: it notices what was superseded, what is duplicated, what has gone
-stale, and what real outcomes taught, and it proposes changes for a human to
-accept.
+`e3d-brain` is a small, local-first memory server that addresses that. It sits
+over a plain folder of Markdown files (an [Obsidian](https://obsidian.md)
+vault) that you own, speaks [MCP](https://modelcontextprotocol.io), and gives
+Claude and the E3D agents **continuity** they can cite. A second layer,
+**cognition**, then looks after the memory: it notices what was superseded,
+what is duplicated, what has gone stale, and what real outcomes taught, and it
+proposes changes for a human to accept.
 
 Two ideas hold the whole thing together:
 
