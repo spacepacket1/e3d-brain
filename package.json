@@ -4,18 +4,41 @@
   "description": "Local-first, auditable MCP memory server over a plain-Markdown Obsidian vault",
   "license": "MIT",
   "author": "Chris Bloom",
-  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/spacepacket1/e3d-brain.git"
+  },
+  "homepage": "https://github.com/spacepacket1/e3d-brain#readme",
+  "bugs": {
+    "url": "https://github.com/spacepacket1/e3d-brain/issues"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "memory",
+    "obsidian",
+    "markdown",
+    "claude",
+    "agents"
+  ],
   "type": "module",
   "engines": {
     "node": ">=22"
   },
   "bin": {
-    "ebrain": "dist/src/cli/main.js"
+    "ebrain": "dist/src/cli/main.js",
+    "e3d-brain": "dist/src/cli/main.js"
   },
+  "files": [
+    "dist/src",
+    "docs/SETUP.md",
+    "docs/SECURITY.md"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "build:native": "npm rebuild better-sqlite3",
-    "test": "npm run build && node --test \"dist/tests/**/*.test.js\""
+    "test": "npm run build && node --test \"dist/tests/**/*.test.js\"",
+    "prepublishOnly": "npm test"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.1",

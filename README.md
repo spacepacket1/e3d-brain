@@ -49,8 +49,8 @@ tested.
 |---|---|
 | **Memory layer** | 15 phases built ([`docs/e3d-brain-spec.md`](docs/e3d-brain-spec.md)) |
 | **Cognition layer** | 9 phases built ([`docs/e3d-brain-cognition-spec.md`](docs/e3d-brain-cognition-spec.md)) |
-| **Tests** | 664 passing, plus 24 per-phase verification scripts |
-| **Verified on** | macOS (Apple silicon). **Not yet run on Linux.** |
+| **Tests** | 675 passing, plus 24 per-phase verification scripts |
+| **Verified on** | macOS and Linux (both arm64; Linux in a Node 22 container). Not yet run on x64 or Windows. |
 
 What is *not* done, so you can judge it fairly:
 
@@ -193,11 +193,26 @@ before they ever create review work.
 
 ## Quick start
 
+### Install from npm
+
+```bash
+npm install -g e3d-brain
+ebrain init --vault ~/Brain --principal you     # writes a config, prints the MCP snippet for your client
+ebrain doctor --strict
+```
+
+Then add the printed snippet to Claude Code, Claude Desktop, or any other MCP
+client that can launch a stdio server. A search through the server has been
+checked end to end from OpenAI's Codex CLI; Claude Code and Claude Desktop use
+the snippets `init` prints. Requires Node 22 or later.
+
+### From source
+
 ```bash
 npm ci --ignore-scripts
 npm run build:native      # the one documented native build (better-sqlite3)
 npm run build
-npm test                  # 664 tests
+npm test                  # 675 tests
 
 node dist/src/cli/main.js init --vault ~/Brain --principal you
 node dist/src/cli/main.js doctor --strict
