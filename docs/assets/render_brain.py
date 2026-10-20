@@ -16,7 +16,7 @@ from PIL import Image, ImageDraw, ImageFilter
 
 W, H = 640, 360
 SS = 2                      # supersampling
-FRAMES, FPS = 96, 16        # 6 second loop
+FRAMES, FPS = 72, 12        # 6 second loop; keeps the GIF under 5 MiB (the plugin directory rejects larger files)
 N_NODES, K_NEAR = 1500, 3
 BG = (4, 6, 14)
 AMBER, ICE = np.array([255, 170, 60]), np.array([120, 220, 255])
