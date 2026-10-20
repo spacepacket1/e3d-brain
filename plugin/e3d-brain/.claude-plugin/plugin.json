@@ -4,7 +4,7 @@
   "version": "0.1.1",
   "description": "Local-first memory over your own Markdown notes: Claude checks them before answering questions about your past decisions, cites what it finds, and proposes new notes into a review inbox you control.",
   "author": {
-    "name": "Chris Bloom",
+    "name": "FutCo LLC",
     "url": "https://github.com/spacepacket1"
   },
   "homepage": "https://github.com/spacepacket1/e3d-brain",

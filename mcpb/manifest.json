@@ -6,7 +6,7 @@
   "description": "Local-first memory over a plain-Markdown vault: cited search, a review inbox, and proposals a human accepts.",
   "long_description": "e3d-brain gives Claude cited search over a folder of Markdown notes (an Obsidian vault) and a review inbox for proposed notes. Nothing becomes permanent memory until you accept it, and every change can be undone. Runs entirely on this computer; nothing is sent anywhere.",
   "author": {
-    "name": "Chris Bloom"
+    "name": "FutCo LLC"
   },
   "repository": {
     "type": "git",
@@ -19,7 +19,9 @@
     "entry_point": "launch.mjs",
     "mcp_config": {
       "command": "node",
-      "args": ["${__dirname}/launch.mjs"],
+      "args": [
+        "${__dirname}/launch.mjs"
+      ],
       "env": {
         "EBRAIN_VAULT": "${user_config.vault_dir}",
         "EBRAIN_MODE": "${user_config.mode}"
@@ -28,7 +30,10 @@
   },
   "tools_generated": true,
   "compatibility": {
-    "platforms": ["darwin", "linux"],
+    "platforms": [
+      "darwin",
+      "linux"
+    ],
     "runtimes": {
       "node": ">=22.0.0"
     }
