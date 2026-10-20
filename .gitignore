@@ -9,3 +9,4 @@ dist/
 .e3d-code-cog/
 __pycache__/
 *.pyc
+dist-mcpb/

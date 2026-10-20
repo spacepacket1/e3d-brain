@@ -206,6 +206,11 @@ client that can launch a stdio server. A search through the server has been
 checked end to end from OpenAI's Codex CLI; Claude Code and Claude Desktop use
 the snippets `init` prints. Requires Node 22 or later.
 
+### Claude Desktop (one-click bundle)
+
+A `.mcpb` bundle for Claude Desktop can be built from source; see
+[`docs/MCPB.md`](docs/MCPB.md) for the steps and its caveats.
+
 ### From source
 
 ```bash
