@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Render docs/assets/brain-spin.gif: a glowing neural "brain" slowly spinning in 3D.
+(The README shows a single frame of it, docs/assets/brain.png; the full GIF is over 5 MiB, which the
+plugin directory rejects, so it is not committed.)
 
 Procedural (numpy + Pillow + ffmpeg); no network, no paid services.
   python3 docs/assets/render_brain.py [out.gif]
@@ -16,7 +18,7 @@ from PIL import Image, ImageDraw, ImageFilter
 
 W, H = 640, 360
 SS = 2                      # supersampling
-FRAMES, FPS = 72, 12        # 6 second loop; keeps the GIF under 5 MiB (the plugin directory rejects larger files)
+FRAMES, FPS = 96, 16        # 6 second loop
 N_NODES, K_NEAR = 1500, 3
 BG = (4, 6, 14)
 AMBER, ICE = np.array([255, 170, 60]), np.array([120, 220, 255])

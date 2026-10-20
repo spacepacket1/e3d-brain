@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/brain-spin.gif" alt="A glowing neural network in the shape of a brain, slowly rotating in 3D" width="640">
+  <img src="docs/assets/brain.png" alt="A glowing neural network in the shape of a brain" width="640">
 </p>
 
 <h1 align="center">e3d-brain</h1>
