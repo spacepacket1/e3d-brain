@@ -5,7 +5,9 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { repoRoot } from './helpers.js';
 
@@ -25,11 +27,34 @@ describe('plugin/e3d-brain', () => {
     assert.ok(fs.readFileSync(path.join(root, 'plugin/e3d-brain/README.md'), 'utf8').split(/\s+/).length >= 40);
   });
 
-  it('launches the local server as `ebrain mcp --auto`, with no secrets or absolute paths', () => {
+  it('launches the server by running a file in the plugin with plain arguments, and has no secrets or absolute paths', () => {
     const raw = fs.readFileSync(path.join(root, 'plugin/e3d-brain/.mcp.json'), 'utf8');
     const mcp = JSON.parse(raw) as { mcpServers: Record<string, { command: string; args: string[]; env?: unknown }> };
-    assert.deepEqual(mcp.mcpServers['e3d-brain'], { command: 'ebrain', args: ['mcp', '--auto'] });
+    assert.deepEqual(mcp.mcpServers['e3d-brain'], { command: 'node', args: ['${CLAUDE_PLUGIN_ROOT}/launch.mjs'] });
     assert.ok(!/\/Users\/|\/home\/|token|secret|key/i.test(raw));
+    const launcher = fs.readFileSync(path.join(root, 'plugin/e3d-brain/launch.mjs'), 'utf8');
+    assert.ok(launcher.length < 256 * 1024);
+    // It may tell the user to install the package; it must not install, download, or call out itself.
+    assert.doesNotMatch(launcher, /\bnpx\b|\bcurl\b|\bfetch\(|https?:|node:https?|node:net\b|spawn\('npm/);
+  });
+
+  it('the launcher runs `ebrain mcp --auto`, passes stdout through, and explains a missing install', () => {
+    const launcher = path.join(root, 'plugin/e3d-brain/launch.mjs');
+    const dir = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'ebrain-launch-'));
+    try {
+      const fake = path.join(dir, 'ebrain');
+      fs.writeFileSync(fake, '#!/bin/sh\necho "args:$*"\nexit 3\n', { mode: 0o755 });
+      const ok = spawnSync(process.execPath, [launcher], { env: { PATH: dir }, encoding: 'utf8' });
+      assert.equal(ok.stdout.trim(), 'args:mcp --auto');
+      assert.equal(ok.status, 3, 'the exit code is passed through');
+      const empty = fs.mkdtempSync(path.join(dir, 'empty-'));
+      const missing = spawnSync(process.execPath, [launcher], { env: { PATH: empty }, encoding: 'utf8' });
+      assert.equal(missing.status, 127);
+      assert.equal(missing.stdout, '', 'nothing on stdout, which carries the protocol');
+      assert.match(missing.stderr, /npm install -g e3d-brain/);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('has a skill whose name matches its folder and whose description says when to use it', () => {
