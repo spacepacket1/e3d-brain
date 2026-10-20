@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Render docs/assets/brain-spin.gif: a glowing neural "brain" slowly spinning in 3D.
+(The README shows a single frame of it, docs/assets/brain.png; the full GIF is over 5 MiB, which the
+plugin directory rejects, so it is not committed.)
 
 Procedural (numpy + Pillow + ffmpeg); no network, no paid services.
   python3 docs/assets/render_brain.py [out.gif]
