@@ -1,0 +1,15 @@
+{
+  "name": "e3d-brain",
+  "owner": {
+    "name": "Chris Bloom",
+    "url": "https://github.com/spacepacket1"
+  },
+  "plugins": [
+    {
+      "name": "e3d-brain",
+      "source": "./plugin/e3d-brain",
+      "description": "Local-first memory over your own Markdown notes, with a skill that makes Claude check them before answering questions about your past decisions."
+    }
+  ],
+  "description": "Plugins from the e3d-brain project: local-first memory for Claude over your own Markdown notes."
+}

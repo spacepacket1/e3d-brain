@@ -145,8 +145,9 @@ export function registerInboxTools(env: InboxToolEnv, registry: ToolRegistry): v
       name: 'capture',
       modes: ['inbox'],
       description:
-        'Propose a note for the owner to review. It is saved under _inbox/ with status "proposed" (secrets redacted) and does not become ' +
-        'curated memory until the owner accepts it. Cannot edit, move, or overwrite anything.',
+        'Propose a note for the owner to review. Use it when the user asks you to remember, save, or record something (a decision, a lesson, a preference). ' +
+        'It is saved under _inbox/ with status "proposed" (secrets redacted) and does not become curated memory until the owner accepts it: tell the user ' +
+        'it is pending their review, never that it is saved. Cannot edit, move, delete, or overwrite anything.',
       schema: CAPTURE_SCHEMA,
       handler: (args, ctx) => capture(env, args, ctx),
     },

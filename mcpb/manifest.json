@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "e3d-brain",
   "display_name": "e3d-brain",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Local-first memory over a plain-Markdown vault: cited search, a review inbox, and proposals a human accepts.",
   "long_description": "e3d-brain gives Claude cited search over a folder of Markdown notes (an Obsidian vault) and a review inbox for proposed notes. Nothing becomes permanent memory until you accept it, and every change can be undone. Runs entirely on this computer; nothing is sent anywhere.",
   "author": {
