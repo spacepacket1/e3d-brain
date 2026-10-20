@@ -1,0 +1,51 @@
+{
+  "manifest_version": "0.3",
+  "name": "e3d-brain",
+  "display_name": "e3d-brain",
+  "version": "0.1.0",
+  "description": "Local-first memory over a plain-Markdown vault: cited search, a review inbox, and proposals a human accepts.",
+  "long_description": "e3d-brain gives Claude cited search over a folder of Markdown notes (an Obsidian vault) and a review inbox for proposed notes. Nothing becomes permanent memory until you accept it, and every change can be undone. Runs entirely on this computer; nothing is sent anywhere.",
+  "author": {
+    "name": "Chris Bloom"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/spacepacket1/e3d-brain"
+  },
+  "homepage": "https://github.com/spacepacket1/e3d-brain",
+  "license": "MIT",
+  "server": {
+    "type": "node",
+    "entry_point": "launch.mjs",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/launch.mjs"],
+      "env": {
+        "EBRAIN_VAULT": "${user_config.vault_dir}",
+        "EBRAIN_MODE": "${user_config.mode}"
+      }
+    }
+  },
+  "tools_generated": true,
+  "compatibility": {
+    "platforms": ["darwin", "linux"],
+    "runtimes": {
+      "node": ">=22.0.0"
+    }
+  },
+  "user_config": {
+    "vault_dir": {
+      "type": "directory",
+      "title": "Vault folder",
+      "description": "The folder of Markdown notes (an Obsidian vault) to use as memory.",
+      "required": true
+    },
+    "mode": {
+      "type": "string",
+      "title": "Mode",
+      "description": "inbox: Claude can search and propose notes into a review inbox. read-only: Claude can only search and read.",
+      "default": "inbox",
+      "required": false
+    }
+  }
+}
