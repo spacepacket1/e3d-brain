@@ -6,6 +6,8 @@
 
 <p align="center"><b>Memory you own and can audit, and a mind that tidies it.</b></p>
 
+[![M8ven Score](https://m8ven.ai/badge/mcp/spacepacket1-e3d-brain-ob6dra?v=5fbb50a2d078c9d6d907ace5e7266d49)](https://m8ven.ai/mcp/spacepacket1-e3d-brain-ob6dra?s=readme)
+
 <p align="center">
   <a href="https://www.youtube.com/watch?v=AmsJmRBiwiI">
     <img src="docs/assets/film-poster.jpg" alt="A team of engineers gathered around a glowing holographic brain: watch the e3d-brain concept film on YouTube" width="640">
