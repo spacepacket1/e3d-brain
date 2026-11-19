@@ -58,9 +58,11 @@ What is *not* done, so you can judge it fairly:
 
 - **No security review.** The code was written by AI and checked by tests and
   by independent model reviews of the design, not by a human security audit.
-- **Not yet connected to real clients or the rest of the ecosystem.** The tests
-  drive the real MCP server over stdio, but no one has yet used it from Claude
-  Code day to day, and the integrations described below are planned, not live.
+- **Only one integration is live so far.** The tests drive the real MCP server
+  over stdio, and [e3d-loop](https://github.com/spacepacket1/e3d-loop) uses it
+  as the shared project memory for its multi-model coding runs. The other
+  integrations described below are planned, not live, and no one has yet used
+  it from Claude Code day to day.
 - **Not yet proven useful.** It is built to measure whether the cognition jobs
   earn their keep (see below); it has not yet run long enough on real data to say.
 
@@ -79,12 +81,13 @@ Memory is not the record. It is the *reader* of the record.
 </p>
 
 Each consumer runs its **own brain** on its own vault. There is no shared
-server and no cross-brain data flow. The picture above shows the plan: these
-integrations are not built yet.
+server and no cross-brain data flow. The picture above shows the plan: apart from
+e3d-loop, these integrations are not built yet.
 
 | Consumer | Best use of the brain | What it contributes back |
 |---|---|---|
 | **You and Claude Code** | Resume work with current decisions, rationale, open questions, and rejected approaches | Proposed decisions and discoveries |
+| **e3d-loop** | Give every model in a phased coding run the same cited project notes, while a different model family reviews each phase | Lesson proposals into the review inbox, only with confirmation |
 | **e3d-pilot** | Recall previous attempts, constraints, and lessons before drafting a spec | References to specs, commits, failures, verified results |
 | **e3d-corp** | Retrieve company priorities and lessons when evaluating opportunities | Evidence exports linking proposals, actions, and outcomes |
 | **e3d-creative** | Retrieve audience knowledge, brand voice, past concepts, and supported claims | Creative rationale and later campaign results |
