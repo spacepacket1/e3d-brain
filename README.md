@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/brain.png" alt="A glowing neural network in the shape of a brain" width="640">
+  <img src="https://raw.githubusercontent.com/spacepacket1/e3d-brain/main/docs/assets/brain.png" alt="A glowing neural network in the shape of a brain" width="640">
 </p>
 
 <h1 align="center">e3d-brain</h1>
@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://www.youtube.com/watch?v=AmsJmRBiwiI">
-    <img src="docs/assets/film-poster.jpg" alt="A team of engineers gathered around a glowing holographic brain: watch the e3d-brain concept film on YouTube" width="640">
+    <img src="https://raw.githubusercontent.com/spacepacket1/e3d-brain/main/docs/assets/film-poster.jpg" alt="A team of engineers gathered around a glowing holographic brain: watch the e3d-brain concept film on YouTube" width="640">
   </a>
   <br>
   <a href="https://www.youtube.com/watch?v=AmsJmRBiwiI"><b>▶ Watch the concept film</b></a> (1:52)
@@ -77,7 +77,7 @@ Memory is not the record. It is the *reader* of the record.
 | **e3d-brain** | Notes that point back to both | *Nothing.* It helps retrieve and interpret |
 
 <p align="center">
-  <img src="docs/assets/ecosystem.png" alt="e3d-brain at the centre, connected to Claude Code, e3d-pilot, e3d-corp, e3d-creative, e3d-agent and e3d.ai stories, each of which gets a memory of its own" width="900">
+  <img src="https://raw.githubusercontent.com/spacepacket1/e3d-brain/main/docs/assets/ecosystem.png" alt="e3d-brain at the centre, connected to Claude Code, e3d-pilot, e3d-corp, e3d-creative, e3d-agent and e3d.ai stories, each of which gets a memory of its own" width="900">
 </p>
 
 Each consumer runs its **own brain** on its own vault. There is no shared

@@ -3,7 +3,7 @@
   "version": "0.1.2",
   "description": "Local-first, auditable MCP memory server over a plain-Markdown Obsidian vault",
   "license": "MIT",
-  "author": "Chris Bloom",
+  "author": "FutCo LLC",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/spacepacket1/e3d-brain.git"
