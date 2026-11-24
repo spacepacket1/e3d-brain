@@ -218,10 +218,10 @@ server? `ebrain init` prints the snippets instead.
 
 | Where you use Claude | Use |
 |---|---|
-| Claude Code | `ebrain setup`, plus the [plugin](plugin/e3d-brain/README.md) (a skill so Claude checks your notes unprompted; it does not start the server) |
+| Claude Code | `ebrain setup`, or the [plugin](plugin/e3d-brain/README.md) (adds a skill so Claude checks your notes unprompted) |
 | Claude Desktop, Chat tab | `ebrain setup`, or the one-click `.mcpb` bundle below |
 | Codex CLI | `ebrain setup` |
-| Cowork | `ebrain setup` for the server, plus the plugin for the skill; not yet tested here |
+| Cowork | the plugin's local server should load in Cowork sessions on your computer; not yet tested here |
 | ChatGPT | needs a remote server or OpenAI's tunnel client; not set up |
 
 ### Claude Desktop (one-click bundle)
