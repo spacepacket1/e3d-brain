@@ -71,7 +71,8 @@ that downloads anything when the client starts, and it uses no network.
 
 `ebrain mcp --auto` is the same server with a zero-setup start: if no config exists it creates the
 default one (vault from `$EBRAIN_VAULT`, else `~/Brain`; mode from `$EBRAIN_MODE`, else `inbox`) and
-reports that on stderr. The Claude plugin in `plugin/e3d-brain/` launches it this way.
+reports that on stderr. The Claude plugin in `plugin/e3d-brain/` is a skill only and does not launch the
+server; register it with `ebrain setup`.
 
 ## Connecting Claude (MCP over stdio)
 
