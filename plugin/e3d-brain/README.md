@@ -10,12 +10,21 @@ accept it, and every change can be undone.
 
 ## Install
 
-The plugin starts the `ebrain` server on your computer, so install that first
-(Node 22 or later):
+The plugin is a skill only: it does not start or bundle the server. The
+`ebrain` server is a separate npm package that you install and register
+yourself, once (Node 22 or later):
 
 ```bash
 npm install -g e3d-brain
+ebrain setup
 ```
+
+`ebrain setup` creates a default config (your notes folder is `~/Brain`, in
+inbox mode) and registers the server with the Claude clients it finds on your
+computer, asking before it changes anything. To use another folder or run
+read-only, pass `--vault <folder>` or `--mode read-only`. The
+[setup guide](https://github.com/spacepacket1/e3d-brain/blob/main/docs/SETUP.md)
+covers registering by hand.
 
 Then add this repository as a marketplace and install the plugin, in Claude Code:
 
@@ -24,10 +33,7 @@ Then add this repository as a marketplace and install the plugin, in Claude Code
 /plugin install e3d-brain@e3d-brain
 ```
 
-On first start the server creates a default config (your notes folder is
-`~/Brain`, in inbox mode). To use another folder or run read-only, run
-`ebrain setup --vault <folder> --mode read-only` before the first start, or set
-`EBRAIN_VAULT` and `EBRAIN_MODE`.
+Restart Claude so it picks up the server.
 
 ## Use it
 
@@ -37,17 +43,17 @@ something: "Remember that we will revisit the database choice in Q4." That lands
 in `_inbox/` as a proposal. Accept it from the CLI (`ebrain inbox accept <id>`) or
 by moving the file in your notes app.
 
-## How it starts
+## What the plugin contains
 
-The plugin's `.mcp.json` runs `node ${CLAUDE_PLUGIN_ROOT}/launch.mjs`, a short file in this
-plugin that starts the `ebrain` command from your global install as `ebrain mcp --auto`,
-and prints how to install it if it is missing. It runs nothing else and downloads nothing.
-The server is a separate, versioned npm package rather than a copy inside the plugin
-because it uses a native SQLite build.
+One skill, `e3d-brain-memory`, and nothing that runs: no MCP server, no
+scripts, no hooks. The skill tells Claude when to search your notes and how to
+cite them. The tools it uses come from the `ebrain` server you registered
+above; if that server is not connected, Claude says so instead of pretending
+to have searched.
 
 ## Data
 
-Everything stays on your computer. The server reads your vault, keeps a search
+Everything stays on your computer. The plugin itself reads and sends nothing. The server reads your vault, keeps a search
 index and audit log under `~/.e3d-brain/`, and makes no network requests by
 default; nothing is sent to Anthropic beyond what Claude itself reads from your
 notes during a conversation you start. It is tested, but it has not had a human

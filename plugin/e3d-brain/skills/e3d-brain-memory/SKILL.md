@@ -33,6 +33,6 @@ no tool can do those things. The user accepts proposals themselves (in their
 notes app, or with `ebrain inbox accept`).
 
 If the e3d-brain tools are not available in this session, tell the user the
-e3d-brain server is not running, and that installing it (`npm install -g
-e3d-brain`) and restarting Claude Code is the fix. Do not pretend to have
-searched.
+e3d-brain server is not connected. This plugin does not start it: they install
+and register it once with `npm install -g e3d-brain` and then `ebrain setup`,
+and restart Claude. Do not pretend to have searched.
